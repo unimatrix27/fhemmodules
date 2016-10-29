@@ -33,6 +33,7 @@ my $PAServer_getpapatterns = {"sinks" =>
                        "client" => qr/Client: (.*)/,
                        "volume" => qr/Volume: front-left:.*\s(\d+)%/,
                        "mute" => qr/Mute: (.*)/,
+					   "medianame" => qr/media\.name = \"(.*)\"/,
                        "owner" => qr/Owner Module: (\d+)/}};
 	   
 sub PAServer_Initialize($) {
@@ -139,6 +140,8 @@ sub PAServer_Write($$$){
 		case "deleted"   {
 			PAServer_unregisterClient($hash,$client);
 			readingsSingleUpdate($hash,"clients.$client.online","deleted",1);
+			RemoveInternalTimer($hash);
+			InternalTimer(gettimeofday(), "PAServer_processCmd", $hash, 0);  # initiate the regular update process
 		}
 	}
 	return undef;
@@ -213,6 +216,16 @@ sub PAServer_doUpdate($){
     return  $output."|".$json;
 }
 
+sub PAServer_getSinkInput($$){
+	my ($hash, $client) = @_;
+	foreach my $key (keys (%{$hash->{MODULES}->{'sink-inputs'}})){
+		my $value=$hash->{MODULES}->{'sink-inputs'}{$key};
+		#Log 1, "PA getSinkInput key $key, medianame: ".$value->{medianame};
+		return ($key,$value->{sink}) if($value->{medianame} eq $client);
+	}
+	return (undef, undef)
+}
+
 sub PAServer_finishedUpdate($){
     my ($string) = @_;
     return unless(defined($string));
@@ -246,6 +259,7 @@ sub PAServer_finishedUpdate($){
 			# iterate all sinks if this is a server
 			# 1. iterate through all sinks
 			my $clienthash;
+			delete $hash->{helper}{sinktypes};
 			while (my($key,$value) = each (%{$hash->{MODULES}->{sinks}})){
 				# is it a tunnel sink?
 				if($value->{name}=~/tunnel/){
@@ -253,12 +267,13 @@ sub PAServer_finishedUpdate($){
 						my $clientname=$1;
 						readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"clients.$clientname.tunnel","established");readingsEndUpdate($hash,1);
 						readingsBeginUpdate($clienthash);readingsBulkUpdateIfChanged($clienthash,"tunnel","established");readingsEndUpdate($clienthash,1);
+						$hash->{helper}{sinks}{$clientname}=$key unless $hash->{helper}{sinktypes}{$clientname} eq "combine";
 					}else{
 						PAServer_deleteModule($hash,$value->{owner});
 					}
 				# is it a combine sink (so more than 1 client listening to the same source / multiroom sync)
 				}elsif($value->{name}=~/combine/){
-					if($value->{name}=~/^(.+)\.combine$/ && defined($clienthash=$defs{$1})){  # is it a valid tunnel sink
+					if($value->{name}=~/^(.+)\.combine$/ && defined($clienthash=$defs{$1})){  # is it a valid combine sink
 						my $clientname=$1;
 						my $slaves=$value->{slaves};
 						## den client aus den slaves extrahieren, wenn er nicht selbst drin ist ist tunnel ungueltig
@@ -273,6 +288,8 @@ sub PAServer_finishedUpdate($){
 								PAServer_deleteModule($hash,$value->{owner});
 							}else{
 								readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"clients.$clientname.slaves",$slaves);readingsEndUpdate($hash,1);
+								$hash->{helper}{sinks}{$clientname}=$key;
+								$hash->{helper}{sinktypes}{$clientname}="combine";
 							}
 						}						
 						Log 1, "PAServer $hash->{NAME} Slavesvon $clientname: $slaves | desired: ".PAServer_getAttached($hash,$clientname,1);
@@ -283,7 +300,14 @@ sub PAServer_finishedUpdate($){
 				}
 			}
 			# iterate clients and, if there is a client that does not have a combine module  but shoudl have one, create it
+			# in the same foreach loop also redirect sink input if needed
 			foreach my $clientname (@{$hash->{CLIENTS}}){
+				my ($sinkinput,$actualsink) = PAServer_getSinkInput($hash,$clientname);
+				my $sink = $hash->{helper}{sinks}{$clientname};
+				Log 1, "PA: clientname: $clientname, sinkinput: $sinkinput, sink: ".$sink.", actualsink: $actualsink";
+				if(defined($sinkinput)){
+					PAServer_moveSinkInput($hash,$sinkinput,$sink) if($sink != $actualsink);
+				}
 				my $found_combine = 0;
 				while (my($key,$value) = each (%{$hash->{MODULES}->{sinks}})){
 					$found_combine=1 if ($value->{name}=~/$clientname\.combine/);
@@ -332,7 +356,6 @@ sub PAServer_processCmd($$){
 		$args.="|".$cmd->{cmd};
 	}
 	$hash->{helper}{RUNNING_PID} = BlockingCall("PAServer_doUpdate", $args, "PAServer_finishedUpdate", 5,"PAServer_abortUpdate",$hash) unless(exists($hash->{helper}{RUNNING_PID}));
-	Log $PAServer_LogLevelDebug , "PAServer: $name XprocessCmd : ".$hash->{helper}{RUNNING_PID}{pid}." args: $args" if($hash->{helper}{RUNNING_PID});
 }
 
 sub PAServer_PushCmdStack($$) {
@@ -365,6 +388,12 @@ sub PAServer_registerClient($$){
 		push(@{$hash->{CLIENTS}},$client);
 	}
 }
+
+sub PAServer_moveSinkInput($$$){
+	my ($hash, $sinkinput,$sink) = @_;
+	my $cmd = "move-sink-input $sinkinput $sink";
+	PAServer_PushCmdStack($hash,$cmd);
+}
 sub PAServer_unregisterClient($$){
 	my ($hash, $client) = @_;
 	Log 1,"PAServer: $hash->{NAME} UnRegisterClient $client";
@@ -378,7 +407,10 @@ sub PAServer_unregisterClient($$){
 		}
 		@{$hash->{CLIENTS}} = @clients;
 	}
+	readingsSingleUpdate($hash,"client.$client.desiredmaster","",1);
 }
+
+
 
 sub PAServer_getAttached($$$){
 	# selector = 0 not implemented yet
@@ -388,7 +420,7 @@ sub PAServer_getAttached($$$){
 	my $result="";
 	$selector=2;
 	foreach (@{$hash->{CLIENTS}}){
-		Log 1, "PA getAttached client: $client, Reading: client.$_.desiredmaster , Val: ".ReadingsVal($hash->{name},"client.$_.desiredmaster","");
+		#Log 1, "PA getAttached client: $client, Reading: client.$_.desiredmaster , Val: ".ReadingsVal($hash->{name},"client.$_.desiredmaster","");
 		if($client eq ReadingsVal($hash->{name},"client.$_.desiredmaster","")){
 			if($selector == 2){ #do we want to get the full list of desired even if not online and tunnel established?
 					$result.="," unless ($result eq "");
@@ -403,6 +435,9 @@ sub PAServer_getAttached($$$){
 	}
 	return $result;
 }
+
+
+
 
 1;
 
