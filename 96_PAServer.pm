@@ -53,6 +53,8 @@ sub PAServer_Initialize($) {
     $hash->{AttrList} =
           "startcmd stopcmd interval "
         . $readingFnAttributes;
+	
+
 }
 
 sub PAServer_Define($$) {
@@ -130,18 +132,20 @@ sub PAServer_Write($$$){
 			PAServer_registerClient($hash,$client);
 			PAServer_createTunnel($hash,$client) unless (PAServer_getTunnelId($hash,$client));
 			readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"clients.$client.online","on");readingsEndUpdate($hash,1);
-			# besteht noch kein tunnel?
-				# dann tunnel anlegen
-				# gibt es ein sink input fuer diesen client vom MPD
-					# dann diesen sink input auf den tunnel leiten
-			# sonst
-				#
 		}
 		case "deleted"   {
 			PAServer_unregisterClient($hash,$client);
 			readingsSingleUpdate($hash,"clients.$client.online","deleted",1);
 			RemoveInternalTimer($hash);
 			InternalTimer(gettimeofday(), "PAServer_processCmd", $hash, 0);  # initiate the regular update process
+		}
+		case "offline"   {
+			readingsBeginUpdate($hash);
+			readingsBulkUpdate($hash,"clients.$client.online","off");
+			readingsBulkUpdate($hash,"clients.$client.tunnel","down");
+			readingsEndUpdate($hash,1);
+			RemoveInternalTimer($hash);
+			InternalTimer(gettimeofday(), "PAServer_processCmd", $hash, 0);  # initiate the regular update process 
 		}
 	}
 	return undef;
@@ -220,7 +224,6 @@ sub PAServer_getSinkInput($$){
 	my ($hash, $client) = @_;
 	foreach my $key (keys (%{$hash->{MODULES}->{'sink-inputs'}})){
 		my $value=$hash->{MODULES}->{'sink-inputs'}{$key};
-		#Log 1, "PA getSinkInput key $key, medianame: ".$value->{medianame};
 		return ($key,$value->{sink}) if($value->{medianame} eq $client);
 	}
 	return (undef, undef)
@@ -234,15 +237,14 @@ sub PAServer_finishedUpdate($){
     my $name = $hash->{NAME};
 	my @actualClients;
 	my @desiredClients;
-    Log 1, "PAServer $name finishedUpdatePID : ".$hash->{helper}{RUNNING_PID}{pid};
     delete($hash->{helper}{RUNNING_PID});
     if($ret=~/error/){ # if an error occurs, this means that pulseaudio is not running or not running currectly. We will consider it as offline.
         readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"pulseaudio","offline");readingsEndUpdate($hash,1);
 		delete $hash->{MODULES};
+		IOWrite ($hash, $name,"offline")  unless ($hash->{TYPE} eq "PAServer");
     }else{
         readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"pulseaudio","online");
 		if($hash->{TYPE} eq "PAClient"){
-			Log 1, "PAClient $hash->{NAME} going to IOWrite now";
 			IOWrite ($hash, $hash->{name},"online");
 			readingsBulkUpdateIfChanged($hash,"tunnel","requested") unless ReadingsVal($hash->{name},"tunnel",0) eq "established";
 		}
@@ -263,7 +265,7 @@ sub PAServer_finishedUpdate($){
 			while (my($key,$value) = each (%{$hash->{MODULES}->{sinks}})){
 				# is it a tunnel sink?
 				if($value->{name}=~/tunnel/){
-					if($value->{name}=~/^(.+)\.tunnel$/ && defined($clienthash=$defs{$1})){  # is it a valid tunnel sink
+					if($value->{name}=~/^(.+)\.tunnel$/ && defined($clienthash=$defs{$1}) && ReadingsVal($hash->{name},"clients.$1.online","") eq "on"){  # is it a valid tunnel sink
 						my $clientname=$1;
 						readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"clients.$clientname.tunnel","established");readingsEndUpdate($hash,1);
 						readingsBeginUpdate($clienthash);readingsBulkUpdateIfChanged($clienthash,"tunnel","established");readingsEndUpdate($clienthash,1);
@@ -304,8 +306,8 @@ sub PAServer_finishedUpdate($){
 			foreach my $clientname (@{$hash->{CLIENTS}}){
 				my ($sinkinput,$actualsink) = PAServer_getSinkInput($hash,$clientname);
 				my $sink = $hash->{helper}{sinks}{$clientname};
-				Log 1, "PA: clientname: $clientname, sinkinput: $sinkinput, sink: ".$sink.", actualsink: $actualsink";
-				if(defined($sinkinput)){
+				#Log 1, "PA: clientname: $clientname, sinkinput: $sinkinput, sink: ".$sink.", actualsink: $actualsink";
+				if(defined($sinkinput) && defined($sink){
 					PAServer_moveSinkInput($hash,$sinkinput,$sink) if($sink != $actualsink);
 				}
 				my $found_combine = 0;
@@ -379,7 +381,6 @@ sub PAServer_PushCmdStack($$) {
 
 sub PAServer_registerClient($$){
 	my ($hash, $client) = @_;
-	Log 1,"PAServer: $hash->{NAME} RegisterClient $client";
 	my @arr = ();
 	if(!$hash->{CLIENTS}){ 
 		$hash->{CLIENTS} = \@arr;
@@ -396,7 +397,6 @@ sub PAServer_moveSinkInput($$$){
 }
 sub PAServer_unregisterClient($$){
 	my ($hash, $client) = @_;
-	Log 1,"PAServer: $hash->{NAME} UnRegisterClient $client";
 	if($hash->{CLIENTS}){
 		my @clients = @{$hash->{CLIENTS}};
 		my @temp = grep { $clients[$_] eq $client } 0..$#clients;
@@ -418,9 +418,7 @@ sub PAServer_getAttached($$$){
 	# selector = 2 return all clients that would like to be slaves no matter if they are already ready for it
 	my ($hash, $client,$selector) = @_;
 	my $result="";
-	$selector=2;
 	foreach (@{$hash->{CLIENTS}}){
-		#Log 1, "PA getAttached client: $client, Reading: client.$_.desiredmaster , Val: ".ReadingsVal($hash->{name},"client.$_.desiredmaster","");
 		if($client eq ReadingsVal($hash->{name},"client.$_.desiredmaster","")){
 			if($selector == 2){ #do we want to get the full list of desired even if not online and tunnel established?
 					$result.="," unless ($result eq "");
