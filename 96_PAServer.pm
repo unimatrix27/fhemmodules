@@ -306,8 +306,8 @@ sub PAServer_finishedUpdate($){
 			foreach my $clientname (@{$hash->{CLIENTS}}){
 				my ($sinkinput,$actualsink) = PAServer_getSinkInput($hash,$clientname);
 				my $sink = $hash->{helper}{sinks}{$clientname};
-				#Log 1, "PA: clientname: $clientname, sinkinput: $sinkinput, sink: ".$sink.", actualsink: $actualsink";
-				if(defined($sinkinput) && defined($sink){
+				# Log 1, "PA: clientname: $clientname, sinkinput: $sinkinput, sink: ".$sink.", actualsink: $actualsink";
+				if(defined($sinkinput) && defined($sink)){
 					PAServer_moveSinkInput($hash,$sinkinput,$sink) if($sink != $actualsink);
 				}
 				my $found_combine = 0;
