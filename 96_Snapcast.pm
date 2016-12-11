@@ -278,9 +278,7 @@ sub Snapcast_GetStatus($){
   	readingsBulkUpdateIfChanged($hash,"streams",$snumber-1 );
   	readingsEndUpdate($hash,1);
   }
-  
-  #Log3 $name, 3, Dumper($clients[0]);
-  InternalTimer(gettimeofday() + 600, "Snapcast_GetStatus", $hash, 1);
+    InternalTimer(gettimeofday() + 600, "Snapcast_GetStatus", $hash, 1); # every 10 minutes the complete status is updated to be on the safe side
 }
 
 sub Snapcast_SetClient($$$$){
@@ -289,7 +287,6 @@ sub Snapcast_SetClient($$$$){
 	my $method;
 	my $paramset;
 	my $cnumber = Snapcast_getClientNumber($hash,$mac);
-	Log3 $name,3,"$name $method $mac $param $value $cnumber";
 	return undef unless defined($cnumber);
 	$paramset->{client}=$mac;
 	if(looks_like_number($value)){
@@ -297,9 +294,11 @@ sub Snapcast_SetClient($$$$){
 	}else{
 		$paramset->{"$param"} = $value
 	}
-	Log3 $name,3,"$name $method $mac $param $value";
 	return undef unless defined($Snapcast_clientmethods{$param});
 	$method=$Snapcast_clientmethods{$param};
+	if($param eq "stream" && $value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
+
+	}
 	Log3 $name,3,"$name $method $mac $param $value";
 	my $result = Snapcast_Do($hash,$method,$paramset);
 	return undef unless defined ($result);
@@ -378,39 +377,42 @@ sub Snapcast_getMac($$){
 <a name="Snapcast"></a>
 <h3>Snapcast</h3>
 <ul>
-    <i>PASeerver</i> is the server side module for the FHEM Pulseaudio Multiroom Solution. It automates the process of managing
-	the dynamic creation and deletion of Pulseaudio Tunnel and Combine Sinks in order to create a truly synced multiroom audiio experience
-	Pulseaudio capable of transfering audio to any other computer running Pulseaudio, and also to more than one at once. Snapcast integrates this capability
-	into FHEM and combined with the PAClient module it enables the FHEM user to have several clients listen to different or the same source of audio in sync or independently on demand
-	The Snapcast is only useful if there is at least one PAClient while the multiroom feature is only useable with at least 2 clients obviously.
-	Direct playback on the server is not yet implemented
+    <i>Snapcast</i> is a module to control a Snapcast Server. Snapcast is a little project to achieve multiroom audio and is a leightweight alternative to such solutions using Pulseaudio.
+    Find all information about Snapcast, how to install and configure on the <a href="https://github.com/badaix/snapcast">Snapcast GIT</a>
     <br><br>
     <a name="Snapcastdefine"></a>
     <b>Define</b>
     <ul>
-        <code>define <name> Snapcast <ip></code>
+        <code>define <name> Snapcast [&lt;ip&gt; &lt;port&gt;]</code>
         <br><br>
-        Example: <code>define MyServer Snapcast 127.0.0.1</code>
+        Example: <code>define MySnap Snapcast 127.0.0.1 1705</code>
         <br><br>
-        The ip parameter gives the hostname or ip of the machine where pulseaudio is running on and where the audio source is going to be played
-		Currently the Snapcast and PAClient framework is work in progress. It is planned to directly integrate with the mpd sound server using the FHEM MPD module.
+        IP defaults to localhost, and Port to 1705, in case you run Snapcast in the default configuration on the same server as FHEM, you dont need to give those parameters.
         See <a href="http://fhem.de/commandref.html#define">commandref#define</a> 
         for more info about the define command.
     </ul>
     <br>
-    
     <a name="Snapcastset"></a>
     <b>Set</b><br>
     <ul>
-        <code>set <name> <option> <value></code>
+        <code>set &lt;name&gt; &lt;function&gt; &lt;client&gt; &lt;value&gt;</code>
         <br><br>
         See <a href="http://fhem.de/commandref.html#set">commandref#set</a> 
         for more info about the set command.
         <br><br>
         Options:
         <ul>
-              <li><i>tbd</i><br>
-                  tbd</li>
+              <li><i>update</i><br>
+                  Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
+              <li><i>volume</i><br>
+                  Set the volume of a client. For this and all the following options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. Volume Range is 0-100</li>
+              <li><i>mute</i><br>
+                  Mute or unmute by giving true or false as value</li>
+              <li><i>latency</i><br>
+                  Change the Latency Setting of the Client</li>
+              <li><i>stream</i><br>
+                  Change the stream that the client is listening to. Snapcast uses one or more streams which can be unterstood as virtual audio channels. Each client/room can subscribe to one of them. 
+                  By using next as value, you can cycle through the avaialble streams</li>
         </ul>
     </ul>
     <br>
