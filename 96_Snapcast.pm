@@ -17,14 +17,14 @@ my %Snapcast_sets = (
     "volume"   => 2,
     "stream"   => 2,
     "name"	   => 2,
-    "muted"    => 2,
+    "mute"    => 2,
     "latency"    => 2
 );
 
 my %Snapcast_clientmethods = (
     "name"   => "Client.SetName",
     "volume"   => "Client.SetVolume",
-    "muted"   => "Client.SetMute",
+    "mute"   => "Client.SetMute",
 	"stream"   => "Client.SetStream",
 	"latency"   => "Client.SetLatency"
 );
@@ -297,7 +297,6 @@ sub Snapcast_SetClient($$$$){
 	}else{
 		$paramset->{"$param"} = $value
 	}
-
 	Log3 $name,3,"$name $method $mac $param $value";
 	return undef unless defined($Snapcast_clientmethods{$param});
 	$method=$Snapcast_clientmethods{$param};
@@ -313,6 +312,7 @@ sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
   $param = '' unless defined($param);
   my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),1);
+  return undef unless defined($line);
   if($line=~/error/){
   	readingsSingleUpdate($hash,"lastError",$line,1);
   	return undef;
@@ -325,12 +325,16 @@ sub Snapcast_Encode($$$){
   my $name = $hash->{NAME};
   if(defined($hash->{helper}{REQID})){$hash->{helper}{REQID}++;}else{$hash->{helper}{REQID}=1;}
   my $request;
+  my $json;
   $request->{jsonrpc}="2.0";
   $request->{method}=$method;
   $request->{id}=$hash->{helper}{REQID};
   $request->{params} = $param unless $param eq '';
   Log3 $name,3,encode_json($request)."\r\n";
-  return encode_json($request)."\r\n";
+  $json=encode_json($request)."\r\n";
+  $json =~s/\"true\"/true/;			# Snapcast needs bool values without "" but encode_json does not do this
+  $json =~s/\"false\"/false/;
+  return $json;
 }
 
 sub Snapcast_getClientNumber($$){
