@@ -1,9 +1,7 @@
 package main;
 use strict;
 use warnings;
-use Switch;
-use Data::Dumper;
-use JSON::Parse 'parse_json';
+use Scalar::Util qw(looks_like_number);
 
 my $Snapcast_LogLevelDebug = 1;
 my $Snapcast_LogLevelNormal = 1;
@@ -15,8 +13,22 @@ my %Snapcast_gets = (
 );
 
 my %Snapcast_sets = (
-    "tbd"   => "x"
+    "update"   => 0,
+    "volume"   => 2,
+    "stream"   => 2,
+    "name"	   => 2,
+    "muted"    => 2,
+    "latency"    => 2
 );
+
+my %Snapcast_clientmethods = (
+    "name"   => "Client.SetName",
+    "volume"   => "Client.SetVolume",
+    "muted"   => "Client.SetMute",
+	"stream"   => "Client.SetStream",
+	"latency"   => "Client.SetLatency"
+);
+
 
 sub Snapcast_Initialize($) {
     my ($hash) = @_;
@@ -81,13 +93,29 @@ sub Snapcast_Set($@) {
 	
 	my $name = shift @param;
 	my $opt = shift @param;
-	my $value = join("", @param);
+	my $value = join(" ", @param);
 	
 	if(!defined($Snapcast_sets{$opt})) {
 		my @cList = keys %Snapcast_sets;
 		return "Unknown argument $opt, choose one of " . join(" ", @cList);
 	}
-	return "not yet implemented";
+	if(@param < $Snapcast_sets{$opt}){
+		return "$opt requires at least ".$Snapcast_sets{$opt}." arguments";
+	}
+	if($opt eq "update"){
+		Snapcast_GetStatus($hash);
+		return undef;
+	}
+	if(defined($Snapcast_clientmethods{$opt})){
+		my $client = shift @param;
+		$client = Snapcast_getMac($hash,$client);
+		return "client not found, use unique name, IP, or MAC as client identifier" unless defined($client);
+		my $value = shift @param;
+		Snapcast_SetClient($hash,$client,$opt,$value);
+		return undef;
+	}
+
+	return "$opt not yet implemented $value";
 }
 
 sub Snapcast_Read($)
@@ -114,14 +142,22 @@ sub Snapcast_Read($)
   foreach my $line (@lines) {
     # Hier die Results parsen
     Log3 $name, 3, $line;
-    my $update=parse_json($line);
-    if($update->{method}=~/Client/){
+    my $update=decode_json($line);
+    if($update->{method}=~/Client\.OnDelete/){
+    	my $s=$update->{params}->{data};
+    	fhem "deletereading $name client.*";
+    	Snapcast_GetStatus($hash);
+    	return undef;
+    }
+    if($update->{method}=~/Client\./){
     	my $c=$update->{params}->{data};
     	Snapcast_UpdateClient($hash,$c,0);
+    	return undef;
     }
-    if($update->{method}=~/Stream/){
+    if($update->{method}=~/Stream\./){
     	my $s=$update->{params}->{data};
     	Snapcast_UpdateStream($hash,$s,0);
+    	return undef;
     }
 
   }
@@ -160,7 +196,10 @@ sub Snapcast_UpdateClient($$$){
 	if($cnumber==0){
 		$cnumber++;
 		while(defined($hash->{STATUS}->{clients}->{"$cnumber"}) && $c->{host}->{mac} ne $hash->{STATUS}->{clients}->{"$cnumber"}->{host}->{mac}){$cnumber++}
-		if (not defined ($hash->{STATUS}->{clients}->{"$cnumber"})) { return undef;}
+		if (not defined ($hash->{STATUS}->{clients}->{"$cnumber"})) { 
+			Snapcast_GetStatus($hash);
+			return undef;
+		}
 	}
 	$hash->{STATUS}->{clients}->{"$cnumber"}=$c;
  	readingsBeginUpdate($hash);
@@ -173,6 +212,21 @@ sub Snapcast_UpdateClient($$$){
   	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_ip",$c->{host}->{ip} );
   	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_mac",$c->{host}->{mac});
   	readingsEndUpdate($hash,1);
+}
+
+
+
+sub Snapcast_DeleteClient($$$){
+	my ($hash,$mac) = @_;
+	my $paramset;
+	my $cnumber = Snapcast_getClientNumber($hash,$mac);
+	return undef unless defined($cnumber);
+	my $method="Server.DeleteClient";
+	$paramset->{client}=$mac;
+	my $result = Snapcast_Do($hash,$method,$paramset);
+	return undef unless defined ($result);
+	readingsSingleUpdate($hash,"state","Client Deleted: $cnumber",1);
+	Snapcast_GetStatus($hash);
 }
 
 sub Snapcast_UpdateStream($$$){
@@ -189,12 +243,13 @@ sub Snapcast_UpdateStream($$$){
   	readingsEndUpdate($hash,1);
 }
 
+
 sub Snapcast_GetStatus($){
   my ($hash) = @_;
   my $name = $hash->{NAME};
-  my $request;
-  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,'Server.GetStatus'),1);
-  my $status=parse_json($line);
+  
+  my $status=Snapcast_Do($hash,"Server.GetStatus",'');
+  return undef unless defined ($status);
   my $streams=$status->{result}->{streams};
   my $clients=$status->{result}->{clients};
   my $server=$status->{result}->{server};
@@ -208,6 +263,9 @@ sub Snapcast_GetStatus($){
 	  	Snapcast_UpdateClient($hash,$c,$cnumber);
 	  	$cnumber++;
   	}
+  	readingsBeginUpdate($hash);	
+    readingsBulkUpdateIfChanged($hash,"clients",$cnumber-1 );
+    readingsEndUpdate($hash,1);
   }
   if(defined ($streams)){
   	my @streams=@{$streams} unless not defined ($streams);
@@ -216,26 +274,96 @@ sub Snapcast_GetStatus($){
 	  	Snapcast_UpdateStream($hash,$s,$snumber);
 	  	$snumber++;
   	}
+  	readingsBeginUpdate($hash);	
+  	readingsBulkUpdateIfChanged($hash,"streams",$snumber-1 );
+  	readingsEndUpdate($hash,1);
   }
   
   #Log3 $name, 3, Dumper($clients[0]);
   InternalTimer(gettimeofday() + 600, "Snapcast_GetStatus", $hash, 1);
 }
 
+sub Snapcast_SetClient($$$$){
+	my ($hash,$mac,$param,$value) = @_;
+	my $name = $hash->{NAME};
+	my $method;
+	my $paramset;
+	my $cnumber = Snapcast_getClientNumber($hash,$mac);
+	Log3 $name,3,"$name $method $mac $param $value $cnumber";
+	return undef unless defined($cnumber);
+	$paramset->{client}=$mac;
+	if(looks_like_number($value)){
+		$paramset->{"$param"} = $value+0;
+	}else{
+		$paramset->{"$param"} = $value
+	}
 
+	Log3 $name,3,"$name $method $mac $param $value";
+	return undef unless defined($Snapcast_clientmethods{$param});
+	$method=$Snapcast_clientmethods{$param};
+	Log3 $name,3,"$name $method $mac $param $value";
+	my $result = Snapcast_Do($hash,$method,$paramset);
+	return undef unless defined ($result);
+	readingsBeginUpdate($hash);	
+	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_".$param,$result->{result} );
+	readingsEndUpdate($hash,1);
+}
 
-sub Snapcast_Encode($$){
-  my ($hash,$method) = @_;
+sub Snapcast_Do($$$){
+  my ($hash,$method,$param) = @_;
+  $param = '' unless defined($param);
+  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),1);
+  if($line=~/error/){
+  	readingsSingleUpdate($hash,"lastError",$line,1);
+  	return undef;
+  }
+  return decode_json($line);
+}
+
+sub Snapcast_Encode($$$){
+  my ($hash,$method,$param) = @_;
   my $name = $hash->{NAME};
   if(defined($hash->{helper}{REQID})){$hash->{helper}{REQID}++;}else{$hash->{helper}{REQID}=1;}
   my $request;
   $request->{jsonrpc}="2.0";
   $request->{method}=$method;
   $request->{id}=$hash->{helper}{REQID};
+  $request->{params} = $param unless $param eq '';
   Log3 $name,3,encode_json($request)."\r\n";
   return encode_json($request)."\r\n";
 }
 
+sub Snapcast_getClientNumber($$){
+	my ($hash,$mac) = @_;
+	my $name = $hash->{NAME};
+	for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
+		Log3 $name,3,"MAC: $mac, ".ReadingsVal($name,"clients_".$i."_mac","");
+		if ($mac eq ReadingsVal($name,"clients_".$i."_mac","")){
+			return $i;
+		}
+	}
+	return undef;
+}
+
+sub Snapcast_getMac($$){
+	my ($hash,$client) = @_;
+	my $name = $hash->{NAME};
+	if($client=~/^([0-9a-f]{2}([:-]|$)){6}$/i){ # client is already a MAC
+		return $client;
+	}
+	if($client =~ qr/^(?!(\.))(\.?(\d{1,3})(?(?{$^N > 255})(*FAIL))){4}$/){ # client is given as IP address
+		for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
+			if ($client eq ReadingsVal($name,"clients_".$i."_ip","")){
+				return ReadingsVal($name,"clients_".$i."_mac","");
+			}
+		}
+	}
+	for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
+		if ($client eq ReadingsVal($name,"clients_".$i."_name","")){
+			return ReadingsVal($name,"clients_".$i."_mac","");
+		}
+	}
+}
 
 
 1;
