@@ -289,19 +289,29 @@ sub Snapcast_SetClient($$$$){
 	my $cnumber = Snapcast_getClientNumber($hash,$mac);
 	return undef unless defined($cnumber);
 	$paramset->{client}=$mac;
+	return undef unless defined($Snapcast_clientmethods{$param});
+	$method=$Snapcast_clientmethods{$param};
+	if($param eq "stream"){
+		$param="id";
+		if($value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
+			my $currentstream = ReadingsVal($name,"clients_".$cnumber."_stream","");
+			$currentstream = Snapcast_getStreamNumber($hash,$currentstream);
+			if($currentstream++ == ReadingsVal($name,"streams","")){
+				$currentstream=1;
+			}
+			$value=ReadingsVal($name,"streams_".$currentstream."_id","");
+		}
+	}
 	if(looks_like_number($value)){
 		$paramset->{"$param"} = $value+0;
 	}else{
 		$paramset->{"$param"} = $value
 	}
-	return undef unless defined($Snapcast_clientmethods{$param});
-	$method=$Snapcast_clientmethods{$param};
-	if($param eq "stream" && $value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
 
-	}
 	Log3 $name,3,"$name $method $mac $param $value";
 	my $result = Snapcast_Do($hash,$method,$paramset);
 	return undef unless defined ($result);
+	$param=~s/id/stream/;
 	readingsBeginUpdate($hash);	
 	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_".$param,$result->{result} );
 	readingsEndUpdate($hash,1);
@@ -340,13 +350,24 @@ sub Snapcast_getClientNumber($$){
 	my ($hash,$mac) = @_;
 	my $name = $hash->{NAME};
 	for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
-		Log3 $name,3,"MAC: $mac, ".ReadingsVal($name,"clients_".$i."_mac","");
 		if ($mac eq ReadingsVal($name,"clients_".$i."_mac","")){
 			return $i;
 		}
 	}
 	return undef;
 }
+
+sub Snapcast_getStreamNumber($$){
+	my ($hash,$id) = @_;
+	my $name = $hash->{NAME};
+	for(my $i=1;$i<=ReadingsVal($name,"streams",1);$i++){
+		if ($id eq ReadingsVal($name,"streams_".$i."_id","")){
+			return $i;
+		}
+	}
+	return undef;
+}
+
 
 sub Snapcast_getMac($$){
 	my ($hash,$client) = @_;
