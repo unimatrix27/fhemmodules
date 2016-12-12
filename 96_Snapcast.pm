@@ -52,6 +52,7 @@ sub Snapcast_Initialize($) {
 sub Snapcast_Define($$) {
     my ($hash, $def) = @_;
     my @a = split('[ \t]+', $def);
+    return "ERROR: perl module JSON is not installed" if (Snapcast_isPmInstalled($hash,"JSON"));
     $hash->{name}  = $a[0];
     $hash->{ip} = (defined($a[2])) ? $a[2] : "localhost"; 
     $hash->{port} = (defined($a[3])) ? $a[3] : "1705"; 
@@ -69,6 +70,7 @@ sub Snapcast_Define($$) {
 sub Snapcast_Undef($$) {
     my ($hash, $arg) = @_; 
     RemoveInternalTimer($hash);
+    DevIo_CloseDev($hash);
     return undef;
 }
 
@@ -145,7 +147,7 @@ sub Snapcast_Read($)
     my $update=decode_json($line);
     if($update->{method}=~/Client\.OnDelete/){
     	my $s=$update->{params}->{data};
-    	fhem "deletereading $name client.*";
+    	fhem "deletereading $name clients.*";
     	Snapcast_GetStatus($hash);
     	return undef;
     }
@@ -172,7 +174,8 @@ sub Snapcast_Ready($)
     return;
   }
   if ( ReadingsVal( $name, "state", "disconnected" ) eq "disconnected" ) {
-  		fhem "deletereading ".$name." .*";
+  		fhem "deletereading ".$name." streams.*";
+  		fhem "deletereading ".$name." clients.*";
         DevIo_OpenDev($hash, 1,"Snapcast_OnConnect");
         return;
     }
@@ -389,7 +392,18 @@ sub Snapcast_getMac($$){
 	}
 }
 
-
+sub Snapcast_isPmInstalled($$)
+{
+  my ($hash,$pm) = @_;
+  my ($name,$type) = ($hash->{NAME},$hash->{TYPE});
+  if (not eval "use $pm;1")
+  {
+    Log3 $name, 1, "$type $name: perl modul missing: $pm. Install it, please.";
+    return "failed: $pm";
+  }
+  
+  return undef;
+}
 1;
 
 =pod
