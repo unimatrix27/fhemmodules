@@ -39,14 +39,12 @@ sub Snapcast_Initialize($) {
     $hash->{GetFn}      = 'Snapcast_Get';
 	$hash->{WriteFn}    = 'Snapcast_Write';
 	$hash->{ReadyFn}    = 'Snapcast_Ready';
-    #$hash->{AttrFn}     = 'Snapcast_Attr';
+    $hash->{AttrFn}     = 'Snapcast_Attr';
     $hash->{ReadFn}     = 'Snapcast_Read';
     $hash->{TIMEOUT}	= 0.1;
     $hash->{AttrList} =
-          "startcmd stopcmd interval "
+          "streamnext:all,playing "
         . $readingFnAttributes;
-	
-
 }
 
 sub Snapcast_Define($$) {
@@ -65,6 +63,15 @@ sub Snapcast_Define($$) {
             "Snapcast_OnConnect",
         );
     return undef;
+}
+
+sub Snapcast_Attr($$){
+	my ($cmd, $name, $attr, $value) = @_;
+    my $hash = $defs{$name};
+	if($attr eq "streamnext"){	
+			return "streamnext needs to be either all or playing" unless $value=~/(all)|(playing)/;
+	}
+	return undef;
 }
 
 sub Snapcast_Undef($$) {
@@ -297,12 +304,17 @@ sub Snapcast_SetClient($$$$){
 	if($param eq "stream"){
 		$param="id";
 		if($value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
+			my $totalstreams=ReadingsVal($name,"streams","");
 			my $currentstream = ReadingsVal($name,"clients_".$cnumber."_stream","");
 			$currentstream = Snapcast_getStreamNumber($hash,$currentstream);
-			if($currentstream++ == ReadingsVal($name,"streams","")){
-				$currentstream=1;
+			
+			my $newstream = $currentstream+1;
+			$newstream=1 unless $newstream <= $totalstreams;
+			while(AttrVal($name, 'streamnext', 'all') eq 'playing' && ReadingsVal($name,"streams_".$newstream."_status","") ne "playing" && $newstream!=$currentstream ) {
+				$newstream++;
+				$newstream=1 unless $newstream <= $totalstreams;
 			}
-			$value=ReadingsVal($name,"streams_".$currentstream."_id","");
+			$value=ReadingsVal($name,"streams_".$newstream."_id","");
 		}
 	}
 	if(looks_like_number($value)){
@@ -319,6 +331,8 @@ sub Snapcast_SetClient($$$$){
 	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_".$param,$result->{result} );
 	readingsEndUpdate($hash,1);
 }
+
+
 
 sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
