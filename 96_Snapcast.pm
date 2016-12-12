@@ -18,7 +18,8 @@ my %Snapcast_sets = (
     "stream"   => 2,
     "name"	   => 2,
     "mute"    => 2,
-    "latency"    => 2
+    "latency"    => 2,
+    "volumeConstraint" => 3
 );
 
 my %Snapcast_clientmethods = (
@@ -26,7 +27,8 @@ my %Snapcast_clientmethods = (
     "volume"   => "Client.SetVolume",
     "mute"   => "Client.SetMute",
 	"stream"   => "Client.SetStream",
-	"latency"   => "Client.SetLatency"
+	"latency"   => "Client.SetLatency",
+	"volumeConstraint" => "internal"
 );
 
 
@@ -43,7 +45,7 @@ sub Snapcast_Initialize($) {
     $hash->{ReadFn}     = 'Snapcast_Read';
     $hash->{TIMEOUT}	= 0.1;
     $hash->{AttrList} =
-          "streamnext:all,playing "
+          "streamnext:all,playing constraintDummy "
         . $readingFnAttributes;
 }
 
@@ -117,20 +119,22 @@ sub Snapcast_Set($@) {
 	}
 	if(defined($Snapcast_clientmethods{$opt})){
 		my $client = shift @param;
+		$value = join(" ", @param);
 		$client = Snapcast_getMac($hash,$client) unless $client eq "all";
 		return "client not found, use unique name, IP, or MAC as client identifier" unless defined($client);
-		my $value = shift @param;
 		if($client eq "all"){
-			Log3 $name,3,"all";
 			for(my $i=1;$i<=ReadingsVal($name,"clients",0);$i++){
-				Snapcast_SetClient($hash,ReadingsVal($name,"clients_".$i."_mac",""),$opt,$value);
+				my $res = Snapcast_SetClient($hash,ReadingsVal($name,"clients_".$i."_mac",""),$opt,$value);
+				readingsSingleUpdate($hash,"lastError",$res,1) if defined ($res);
 				Log3 $name,3,ReadingsVal($name,"clients_".$i."_mac","");
 			}
 			return undef;
 		}
-		Snapcast_SetClient($hash,$client,$opt,$value);
+		my $res = Snapcast_SetClient($hash,$client,$opt,$value);
+		readingsSingleUpdate($hash,"lastError",$res,1) if defined ($res);
 		return undef;
 	}
+
 
 	return "$opt not yet implemented $value";
 }
@@ -309,6 +313,20 @@ sub Snapcast_SetClient($$$$){
 	$paramset->{client}=$mac;
 	return undef unless defined($Snapcast_clientmethods{$param});
 	$method=$Snapcast_clientmethods{$param};
+	if($param eq "volumeConstraint"){
+		my @values=split(/ /,$value);
+		my $match;
+		return "not enough parameters for volumeConstraint" unless @values>=2;
+		if(@values%2){ # there is a match argument given because number is uneven
+			$match=pop(@values);
+		}else{$match="_global_"}
+		for(my $i=0;$i<@values;$i+=2){
+			return "wrong timeformat 00:00 - 24:00 for time/volume pair" unless @values[$i]=~/^(([0-1]?[0-9]|2[0-3]):[0-5][0-9])|24:00$/;
+			return "wrong volumeformat 0 - 100 for time/volume pair" unless @values[$i+1]=~/^(0?[0-9]?[0-9]|100)$/;
+		}
+		readingsSingleUpdate($hash,"volumeConstraint_".$mac."_".$match,$value,1);
+		return undef;
+	}
 	if($param eq "stream"){
 		$param="id";
 		if($value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
@@ -459,12 +477,14 @@ sub Snapcast_isPmInstalled($$)
               <li><i>update</i><br>
                   Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
               <li><i>volume</i><br>
-                  Set the volume of a client. For this and all the following options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. 
+                  Set the volume of a client. For this and all the following 4 options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. 
                   Client can be given as "all", in that case all clients are changed at once. Volume Range is 0-100</li>
               <li><i>mute</i><br>
                   Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
               <li><i>latency</i><br>
-                  Change the Latency Setting of the Client</li>
+                  Change the Latency Setting of the client</li>
+              <li><i>name</i><br>
+                  Change the Name of the client</li>
               <li><i>stream</i><br>
                   Change the stream that the client is listening to. Snapcast uses one or more streams which can be unterstood as virtual audio channels. Each client/room can subscribe to one of them. 
                   By using next as value, you can cycle through the avaialble streams</li>
@@ -477,7 +497,9 @@ sub Snapcast_isPmInstalled($$)
     <li>streamnext<br>
     Can be set to <i>all</i> or <i>playing</i>. If set to <i>all</i>, the <i>next</i> function cycles through all streams, if set to <i>playing</i>, the next function cycles only through streams in the playing state.
     </li>
-    
+        <li>constraintDummy<br>
+    Links the Snapcast module to a dummy. The value of the dummy is then used as a selector for different sets of volumeConstraints. See the description of the volumeConstraint command.
+    </li>
 
   </ul>
 </ul>
