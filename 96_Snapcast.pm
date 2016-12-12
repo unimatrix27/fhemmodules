@@ -117,9 +117,17 @@ sub Snapcast_Set($@) {
 	}
 	if(defined($Snapcast_clientmethods{$opt})){
 		my $client = shift @param;
-		$client = Snapcast_getMac($hash,$client);
+		$client = Snapcast_getMac($hash,$client) unless $client eq "all";
 		return "client not found, use unique name, IP, or MAC as client identifier" unless defined($client);
 		my $value = shift @param;
+		if($client eq "all"){
+			Log3 $name,3,"all";
+			for(my $i=1;$i<=ReadingsVal($name,"clients",0);$i++){
+				Snapcast_SetClient($hash,ReadingsVal($name,"clients_".$i."_mac",""),$opt,$value);
+				Log3 $name,3,ReadingsVal($name,"clients_".$i."_mac","");
+			}
+			return undef;
+		}
 		Snapcast_SetClient($hash,$client,$opt,$value);
 		return undef;
 	}
@@ -421,6 +429,7 @@ sub Snapcast_isPmInstalled($$)
 1;
 
 =pod
+=item summary    control and monitor Snapcast Server
 =begin html
 
 <a name="Snapcast"></a>
@@ -450,9 +459,10 @@ sub Snapcast_isPmInstalled($$)
               <li><i>update</i><br>
                   Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
               <li><i>volume</i><br>
-                  Set the volume of a client. For this and all the following options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. Volume Range is 0-100</li>
+                  Set the volume of a client. For this and all the following options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. 
+                  Client can be given as "all", in that case all clients are changed at once. Volume Range is 0-100</li>
               <li><i>mute</i><br>
-                  Mute or unmute by giving true or false as value</li>
+                  Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
               <li><i>latency</i><br>
                   Change the Latency Setting of the Client</li>
               <li><i>stream</i><br>
