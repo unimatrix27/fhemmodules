@@ -437,8 +437,6 @@ sub Snapcast_isPmInstalled($$)
         Example: <code>define MySnap Snapcast 127.0.0.1 1705</code>
         <br><br>
         IP defaults to localhost, and Port to 1705, in case you run Snapcast in the default configuration on the same server as FHEM, you dont need to give those parameters.
-        See <a href="http://fhem.de/commandref.html#define">commandref#define</a> 
-        for more info about the define command.
     </ul>
     <br>
     <a name="Snapcastset"></a>
@@ -446,9 +444,7 @@ sub Snapcast_isPmInstalled($$)
     <ul>
         <code>set &lt;name&gt; &lt;function&gt; &lt;client&gt; &lt;value&gt;</code>
         <br><br>
-        See <a href="http://fhem.de/commandref.html#set">commandref#set</a> 
-        for more info about the set command.
-        <br><br>
+
         Options:
         <ul>
               <li><i>update</i><br>
@@ -463,8 +459,17 @@ sub Snapcast_isPmInstalled($$)
                   Change the stream that the client is listening to. Snapcast uses one or more streams which can be unterstood as virtual audio channels. Each client/room can subscribe to one of them. 
                   By using next as value, you can cycle through the avaialble streams</li>
         </ul>
-    </ul>
-    <br>
+</ul>
+ <br><br>
+  <a name="Snapcastattr"></a>
+  <b>Attributes</b>
+  <ul>
+    <li>streamnext<br>
+    Can be set to <i>all</i> or <i>playing</i>. If set to <i>all</i>, the <i>next</i> function cycles through all streams, if set to <i>playing</i>, the next function cycles only through streams in the playing state.
+    </li>
+    
+
+  </ul>
 </ul>
 
 =end html
