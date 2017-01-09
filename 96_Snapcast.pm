@@ -343,6 +343,16 @@ sub Snapcast_SetClient($$$$){
 			$value=ReadingsVal($name,"streams_".$newstream."_id","");
 		}
 	}
+  if($param eq "volume" && $value=~/^([\+\-])(\d{1,2})$/){
+    my $direction = $1;
+    my $amount = $2;
+    my $currentVol = Snapcast_GetVolume($hash,$mac);
+    return undef unless defined($currentVol);
+    if($direction eq "+"){$value = $currentVol + $amount;}else{$value = $currentVol - $amount;}
+    $value = 100 if ($value >= 100);
+    $value = 0 if ($value <0);
+   
+  }
 	if(looks_like_number($value)){
 		$paramset->{"$param"} = $value+0;
 	}else{
@@ -399,6 +409,18 @@ sub Snapcast_getClientNumber($$){
 	}
 	return undef;
 }
+
+sub Snapcast_GetVolume($$){
+  my ($hash,$mac) = @_;
+  my $name = $hash->{NAME};
+  for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
+    if ($mac eq ReadingsVal($name,"clients_".$i."_mac","")){
+      return ReadingsVal($name,"clients_".$i."_volume","");
+    }
+  }
+  return undef;
+}
+
 
 sub Snapcast_getStreamNumber($$){
 	my ($hash,$id) = @_;
@@ -478,7 +500,7 @@ sub Snapcast_isPmInstalled($$)
                   Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
               <li><i>volume</i><br>
                   Set the volume of a client. For this and all the following 4 options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. 
-                  Client can be given as "all", in that case all clients are changed at once. Volume Range is 0-100</li>
+                  Client can be given as "all", in that case all clients are changed at once. Volume Range is 0-100 or given as step using +/- e.g  -10 decreases the volume with an amount of 10</li>
               <li><i>mute</i><br>
                   Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
               <li><i>latency</i><br>
@@ -506,4 +528,4 @@ sub Snapcast_isPmInstalled($$)
 
 =end html
 
-=cut
+=currentstream
