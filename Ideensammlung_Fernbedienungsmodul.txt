@@ -1,0 +1,74 @@
+   
+    button = 0
+    button = 1
+    button = 2
+    button = 3
+    button = 4
+    button = 5
+    button = 6
+    button = 7
+    button = 8
+    button = 9
+      - Modul "number helper"
+        - nummern merken, bei jeder ziffer kann timeout gesetzt werden, ansonsten standard timeout aus attribut
+        - get liefert nummer
+        - set ziffer timeout
+        - attribut für TTS anbindung
+
+
+
+- Modul TTS wird erweitert to support:
+  - PULSE_SERVER
+  - checken if dmix option ist
+  - Tabelle von festen WAV files hinterlegen
+  - Constants für Spezielle Sounds, z.B. ACK, NACK, Info, etc.
+  - Schema für Nummernansage
+
+  Weitergeleitet zu Snapcast Client Modul
+    button = mute
+    button = volup
+    button = voldown
+    button = red (cycle streams)
+    button = green (set standard stream (aus attribut))
+
+
+Weitergeleitet zu MPD Modul 
+    button = forward (wenn playlistlength = 0 dann audiofeedback)
+    button = rewind (wenn playlistlength = 0 dann audiofeedback)
+    button = next (wenn playlistlength = 0 dann audiofeedback)
+    button = prev (wenn playlistlength = 0 dann audiofeedback)
+    button = play (wenn playlistlength = 0 dann audiofeedback)
+    button = pause (wenn playlistlength = 0 dann audiofeedback)
+    button = stop
+    button = record (state save) # den aktuellen Status in einer Datei abspeichern, hierfuer muss vorher mit den Ziffern eine Speicherplatznummer eingegeben werden. Mit Audiofeedback NACK oder ACK. Betrifft geladene Playlist und aktuellen Track und aktuelle POsition darin. 
+    button = snap (state load) # entsprechend wieder laden, mit audiofeedback, NACK falls Speicher nicht vorhanden. 
+
+#Playlistauswahl. Muss auf MPD zugreifen. Audiofeedback erforderlich
+    button = progup
+    button = progdown
+
+#anderes
+    button = select (songakt) # soundausgabe mit ansage der tracknummer, greift auf MPD zu
+    
+    button = switch (austimer) # Abschalttimer aktivieren oder verlaengern um konstanten Wert (per Attribut festlegen) / mit audiofeedback
+# cycle control heisst: wenn es mehr als eine Fernbedienung gibt, kann man mit einer auch alle anderen simulieren, so dass man egal welche man in der Hand hat, alles steuern kann. Mit audiofeedback
+    button = yellow (cycle control)
+    button = blue (set standard control)
+
+
+
+    button = cddvd unused
+    button = up unused
+    button = down unused
+    button = right unused
+    button = left unused
+    button = ok unused
+    button = tv unused
+    button = video unused
+    button = text unused
+    button = audio unused
+    button = radio unused
+    button = guide unused
+    button = photo unused
+    button = info unused
+    button = power unused
