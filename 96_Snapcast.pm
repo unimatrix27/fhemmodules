@@ -45,7 +45,7 @@ sub Snapcast_Initialize($) {
     $hash->{ReadFn}     = 'Snapcast_Read';
     $hash->{TIMEOUT}	= 0.1;
     $hash->{AttrList} =
-          "streamnext:all,playing constraintDummy "
+          "streamnext:all,playing constraintDummy volumeStepSize "
         . $readingFnAttributes;
 }
 
@@ -53,13 +53,14 @@ sub Snapcast_Define($$) {
     my ($hash, $def) = @_;
     my @a = split('[ \t]+', $def);
     return "ERROR: perl module JSON is not installed" if (Snapcast_isPmInstalled($hash,"JSON"));
-    $hash->{name}  = $a[0];
+    my $name= $hash->{name}  = $a[0];
     $hash->{ip} = (defined($a[2])) ? $a[2] : "localhost"; 
     $hash->{port} = (defined($a[3])) ? $a[3] : "1705"; 
     readingsSingleUpdate($hash,"state","defined",1);
     RemoveInternalTimer($hash);
     DevIo_CloseDev($hash);
     $hash->{DeviceName} = $hash->{ip}.":".$hash->{port};
+    $attr{$name}{volumeStepSize}       = '5'      unless (exists($attr{$name}{volumeStepSize}));
     DevIo_OpenDev(
             $hash, 0,
             "Snapcast_OnConnect",
@@ -73,6 +74,9 @@ sub Snapcast_Attr($$){
 	if($attr eq "streamnext"){	
 			return "streamnext needs to be either all or playing" unless $value=~/(all)|(playing)/;
 	}
+  if($attr eq "volumeStepSize"){
+    return "volumeStepSize needs to be a number between 1 and 100" unless $value>0 && $value <=100;
+  }
 	return undef;
 }
 
@@ -343,6 +347,7 @@ sub Snapcast_SetClient($$$$){
 			$value=ReadingsVal($name,"streams_".$newstream."_id","");
 		}
 	}
+  # check if volume was given as increment or decrement, then find out current volume and calculate new volume
   if($param eq "volume" && $value=~/^([\+\-])(\d{1,2})$/){
     my $direction = $1;
     my $amount = $2;
@@ -351,7 +356,15 @@ sub Snapcast_SetClient($$$$){
     if($direction eq "+"){$value = $currentVol + $amount;}else{$value = $currentVol - $amount;}
     $value = 100 if ($value >= 100);
     $value = 0 if ($value <0);
-   
+  }
+  # if volume is given with up or down argument, then increase or decrease according to volumeStepSize
+  if($param eq "volume" && $value=~/^(up|down)$/){
+    my $currentVol = Snapcast_GetVolume($hash,$mac);
+    return undef unless defined($currentVol);
+    my $step=AttrVal($name,"volumeStepSize",5);
+    if ($value eq "up"){$value = $currentVol + $step;}else{$value = $currentVol - $step;}
+    $value = 100 if ($value >= 100);
+    $value = 0 if ($value <0);
   }
 	if(looks_like_number($value)){
 		$paramset->{"$param"} = $value+0;
@@ -500,7 +513,9 @@ sub Snapcast_isPmInstalled($$)
                   Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
               <li><i>volume</i><br>
                   Set the volume of a client. For this and all the following 4 options, give client as second parameter, either as name, IP , or MAC and the desired value as third parameter. 
-                  Client can be given as "all", in that case all clients are changed at once. Volume Range is 0-100 or given as step using +/- e.g  -10 decreases the volume with an amount of 10</li>
+                  Client can be given as "all", in that case all clients are changed at once. <br>
+                  Volume cna be given in 3 ways: Range betwee 0 and 100 to set volume directly. Increment or Decrement given between -100 and +100. Keywords <em>up</em> and <em>down</em> to increase or decrease with a predifined step size. 
+                  The step size can be defined in the attribute <em>volumeStepSize</em></li>
               <li><i>mute</i><br>
                   Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
               <li><i>latency</i><br>
@@ -518,6 +533,9 @@ sub Snapcast_isPmInstalled($$)
   <ul>
     <li>streamnext<br>
     Can be set to <i>all</i> or <i>playing</i>. If set to <i>all</i>, the <i>next</i> function cycles through all streams, if set to <i>playing</i>, the next function cycles only through streams in the playing state.
+    </li>
+    <li>volumeStepSize<br>
+      Default: 5. Set this to define, how far the volume is changed when using up/down volume commands. 
     </li>
         <li>constraintDummy<br>
     Links the Snapcast module to a dummy. The value of the dummy is then used as a selector for different sets of volumeConstraints. See the description of the volumeConstraint command.
