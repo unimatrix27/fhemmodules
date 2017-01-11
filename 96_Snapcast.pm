@@ -529,7 +529,7 @@ sub Snapcast_Do($$$){
     return undef;
   };
   return $decoded_json;
-}
+} 
 
 sub Snapcast_Encode($$$){
   my ($hash,$method,$param) = @_;
