@@ -508,10 +508,9 @@ sub Snapcast_SetClient($$$$){
   readingsEndUpdate($clienthash,1);
 }
 
-
-
 sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
+  my $name = $hash->{NAME};
   $param = '' unless defined($param);
   my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),1);
   return undef unless defined($line);
@@ -519,7 +518,17 @@ sub Snapcast_Do($$$){
   	readingsSingleUpdate($hash,"lastError",$line,1);
   	return undef;
   }
-  return decode_json($line);
+  my $decoded_json;
+  eval {
+    $decoded_json = decode_json($line);
+    1;
+  } or do {
+    # Decode JSON died, probably because of incorrect JSON from Snapcast. 
+    Log3 $name,2, "Invalid Response from Snapcast,ignoring result: $line";
+    readingsSingleUpdate($hash,"lastError","Invalid JSON: $line",1);
+    return undef;
+  };
+  return $decoded_json;
 }
 
 sub Snapcast_Encode($$$){
