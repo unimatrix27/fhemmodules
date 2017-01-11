@@ -398,7 +398,7 @@ sub Snapcast_SetClient($$$$){
 sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
   $param = '' unless defined($param);
-  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),1);
+  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),$hash->{TIMEOUT});
   return undef unless defined($line);
   if($line=~/error/){
   	readingsSingleUpdate($hash,"lastError",$line,1);
