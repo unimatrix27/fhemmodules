@@ -66,7 +66,7 @@ my %Snapcast_clientmethods = (
 
 sub Snapcast_Initialize($) {
     my ($hash) = @_;
-	require "$attr{global}{modpath}/FHEM/DevIo.pm";
+	  require "$attr{global}{modpath}/FHEM/DevIo.pm";
     $hash->{DefFn}      = 'Snapcast_Define';
     $hash->{UndefFn}    = 'Snapcast_Undef';
     $hash->{SetFn}      = 'Snapcast_Set';
@@ -86,7 +86,7 @@ sub Snapcast_Define($$) {
     my @a = split('[ \t]+', $def);
     return "ERROR: perl module JSON is not installed" if (Snapcast_isPmInstalled($hash,"JSON"));
     my $name= $hash->{name}  = $a[0];
-    if($a[2] eq "client"){
+    if(defined($a[2]) && $a[2] eq "client"){
         return "Usage: define <name> Snapcast client <server> <id>" unless (defined($a[3]) && defined($a[4]));
         return "Server $a[3] not defined" unless defined ($defs{$a[3]});
         $hash->{MODE} = "client";
@@ -95,7 +95,7 @@ sub Snapcast_Define($$) {
         readingsSingleUpdate($hash,"state","defined",1);
         RemoveInternalTimer($hash);
         DevIo_CloseDev($hash);
-        $attr{$name}{volumeStepSize}       = '5'      unless (exists($attr{$name}{volumeStepSize}));
+        $attr{$name}{volumeStepSize} = '5' unless (exists($attr{$name}{volumeStepSize}));
         return Snapcast_Client_Register_Server($hash);
     }
     $hash->{ip} = (defined($a[2])) ? $a[2] : "localhost"; 
@@ -105,12 +105,22 @@ sub Snapcast_Define($$) {
     RemoveInternalTimer($hash);
     DevIo_CloseDev($hash);
     $hash->{DeviceName} = $hash->{ip}.":".$hash->{port};
-    $attr{$name}{volumeStepSize}       = '5'      unless (exists($attr{$name}{volumeStepSize}));
-    DevIo_OpenDev(
-            $hash, 0,
-            "Snapcast_OnConnect",
-        );
+    $attr{$name}{volumeStepSize} = '5' unless (exists($attr{$name}{volumeStepSize}));
+    
+    Snapcast_Connect($hash);
     return undef;
+}
+
+sub Snapcast_Connect($){
+  my ($hash) = @_;
+  my $name = $hash->{NAME};
+  if (!$init_done){
+      RemoveInternalTimer($hash);
+      InternalTimer(gettimeofday()+5,"Snapcast_Connect", $hash, 0);
+      return "init not done";
+  }else{
+      return DevIo_OpenDev($hash,0,"Snapcast_OnConnect",);
+  }
 }
 
 sub Snapcast_Attr($$){
@@ -200,7 +210,7 @@ sub Snapcast_Set($@) {
 	}
 
 
-	return "$opt not yet implemented $value";
+	return "$opt not yet implemented";
 }
 
 sub Snapcast_Read($)
@@ -367,7 +377,7 @@ sub Snapcast_Client_Register_Server($){
   return undef unless $hash->{MODE} eq "client";
   my $server = $hash->{SERVER};
   if (not defined ($defs{$server})){
-    InternalTimer(gettimeofday() + 30, "Snapcast_Client_Check_Server", $hash, 1); # if server does not exists maybe it got deleted, recheck every 30 seconds if it reappears
+    InternalTimer(gettimeofday() + 30, "Snapcast_Client_Register_Server", $hash, 1); # if server does not exists maybe it got deleted, recheck every 30 seconds if it reappears
     return undef;
   }
   my $id=$hash->{ID};
@@ -639,11 +649,11 @@ sub Snapcast_isPmInstalled($$)
         Options:
         <ul>
               <li><i>update</i><br>
-                  Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working</li>
+                  Perform a full update of the Snapcast Status including streams and servers. Only needed if something is not working. Server module only</li>
               <li><i>volume</i><br>
                   Set the volume of a client. For this and all the following 4 options, give client as second parameter (only for the server module), either as name, IP , or MAC and the desired value as third parameter. 
                   Client can be given as "all", in that case all clients are changed at once (only for server module)<br>
-                  Volume cna be given in 3 ways: Range betwee 0 and 100 to set volume directly. Increment or Decrement given between -100 and +100. Keywords <em>up</em> and <em>down</em> to increase or decrease with a predifined step size. 
+                  Volume can be given in 3 ways: Range betwee 0 and 100 to set volume directly. Increment or Decrement given between -100 and +100. Keywords <em>up</em> and <em>down</em> to increase or decrease with a predifined step size. 
                   The step size can be defined in the attribute <em>volumeStepSize</em></li>
               <li><i>mute</i><br>
                   Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
@@ -668,7 +678,7 @@ sub Snapcast_isPmInstalled($$)
       Default: 5. Set this to define, how far the volume is changed when using up/down volume commands. 
     </li>
         <li>constraintDummy<br>
-    Links the Snapcast module to a dummy. The value of the dummy is then used as a selector for different sets of volumeConstraints. See the description of the volumeConstraint command.
+    Links the Snapcast module to a dummy. The value of the dummy is then used as a selector for different sets of volumeConstraints. See the description of the volumeConstraint command. (not yet implemented)
     </li>
   </ul>
 </ul>
