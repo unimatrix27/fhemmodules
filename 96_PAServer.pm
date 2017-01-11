@@ -241,12 +241,16 @@ sub PAServer_finishedUpdate($){
     if($ret=~/error/){ # if an error occurs, this means that pulseaudio is not running or not running currectly. We will consider it as offline.
         readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"pulseaudio","offline");readingsEndUpdate($hash,1);
 		delete $hash->{MODULES};
-		IOWrite ($hash, $name,"offline")  unless ($hash->{TYPE} eq "PAServer");
+		if($hash->{TYPE} eq "PAClient"){
+			PAClient_IOWrite ($hash, $name,"offline");
+			readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"tunnel","offline");readingsEndUpdate($hash,1);
+		}
     }else{
         readingsBeginUpdate($hash);readingsBulkUpdateIfChanged($hash,"pulseaudio","online");
 		if($hash->{TYPE} eq "PAClient"){
-			IOWrite ($hash, $hash->{name},"online");
-			readingsBulkUpdateIfChanged($hash,"tunnel","requested") unless ReadingsVal($hash->{name},"tunnel",0) eq "established";
+			if(PAClient_IOWrite ($hash, $hash->{name},"online")){
+				readingsBulkUpdateIfChanged($hash,"tunnel","requested") unless ReadingsVal($hash->{name},"tunnel",0) eq "established";
+			}
 		}
 		readingsEndUpdate($hash,1);
         $hash->{MODULES} = decode_json($ret); # we store the sinks and sink-indexes in the hash.
