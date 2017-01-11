@@ -70,7 +70,7 @@ sub Snapcast_Initialize($) {
     $hash->{ReadFn}     = 'Snapcast_Read';
     $hash->{TIMEOUT}	= 0.1;
     $hash->{AttrList} =
-          "streamnext:all,playing constraintDummy volumeStep"
+          "streamnext:all,playing constraintDummy volumeStepSize timeout"
         . $readingFnAttributes;
 }
 
@@ -398,7 +398,7 @@ sub Snapcast_SetClient($$$$){
 sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
   $param = '' unless defined($param);
-  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),$hash->{TIMEOUT});
+  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),AttrVal($hash->{NAME}, 'timeout', 0.1));
   return undef unless defined($line);
   if($line=~/error/){
   	readingsSingleUpdate($hash,"lastError",$line,1);
