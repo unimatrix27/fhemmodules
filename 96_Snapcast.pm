@@ -125,13 +125,16 @@ sub Snapcast_Connect($){
 
 sub Snapcast_Attr($$){
 	my ($cmd, $name, $attr, $value) = @_;
-    my $hash = $defs{$name};
-	if($attr eq "streamnext"){	
+  my $hash = $defs{$name};
+	if ($cmd eq "set"){
+    if($attr eq "streamnext"){	
 			return "streamnext needs to be either all or playing" unless $value=~/(all)|(playing)/;
-	}
-  if($attr eq "volumeStepSize"){
-    return "volumeStepSize needs to be a number between 1 and 100" unless $value>0 && $value <=100;
+	  }
+    if($attr eq "volumeStepSize"){
+      return "volumeStepSize needs to be a number between 1 and 100" unless $value>0 && $value <=100;
+    }
   }
+  
 	return undef;
 }
 
@@ -224,7 +227,7 @@ sub Snapcast_Read($)
   $buf = $hash->{PARTIAL} . $buf;
   
   my $lastchr = substr( $buf, -1, 1 );
-  if ( $lastchr ne "\n" ) {
+  if ( $lastchr ne "\n" || $buf!~/\}$/) {
       $hash->{PARTIAL} = $buf;
       Log3( $hash, 5, "snap: partial command received" );
       return;
@@ -237,7 +240,17 @@ sub Snapcast_Read($)
   foreach my $line (@lines) {
     # Hier die Results parsen
     Log3 $name, 3, $line;
-    my $update=decode_json($line);
+    my $decoded_json;
+    eval {
+      $decoded_json = decode_json($line);
+      1;
+    } or do {
+    # Decode JSON died, probably because of incorrect JSON from Snapcast. 
+      Log3 $name,2, "Invalid Response from Snapcast,ignoring result: $line";
+      readingsSingleUpdate($hash,"lastError","Invalid JSON: $line",1);
+      return undef;
+    };
+    my $update=$decoded_json;
     if($update->{method}=~/Client\.OnDelete/){
     	my $s=$update->{params}->{data};
     	fhem "deletereading $name clients.*";
