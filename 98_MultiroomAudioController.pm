@@ -50,7 +50,7 @@ sub MultiroomAudioController_Initialize($) {
     $hash->{AttrFn}     = 'MultiroomAudioController_Attr';
     $hash->{NotifyOrderPrefix} = "80-"; 
     $hash->{AttrList} =
-          "mrSystem soundSystem mr soundMapping ttsSystem tts numberHelper playlistPattern stateSaveDir "
+          "mrSystem:SNAPCAST soundSystem:MPD mr soundMapping tts numberHelper playlistPattern stateSaveDir seekStep seekDirect:percent,seconds seekStepSmall seekStepSmallThreshold"
         . $readingFnAttributes;
 }
 
@@ -61,8 +61,12 @@ sub MultiroomAudioController_Define($$) {
     readingsSingleUpdate($hash,"state","defined",1);
     RemoveInternalTimer($hash);
     $hash->{NOTIFYDEV}="undefined";
-    $attr{$name}{mrSystem} = 'SNAPCAST' unless (exists($attr{$name}{mrSystem}));
-    $attr{$name}{soundSystem} = 'MPD' unless (exists($attr{$name}{soundSystem}));
+    $attr{$name}{mrSystem}                  = 'SNAPCAST'         unless (exists($attr{$name}{mrSystem}));
+    $attr{$name}{soundSystem}               = 'MPD'              unless (exists($attr{$name}{soundSystem}));
+    $attr{$name}{seekStep}                  = '10'               unless (exists($attr{$name}{seekStep}));
+    $attr{$name}{seekDirect}                = 'percent'          unless (exists($attr{$name}{seekDirect}));
+    $attr{$name}{seekStepSmall}             = '2'                unless (exists($attr{$name}{seekStepSmall}));
+    $attr{$name}{seekStepSmallThreshold}    = '8'                unless (exists($attr{$name}{seekStepSmallThreshold}));
     Log3 $name,3,"MAC DEFINED";
     InternalTimer(gettimeofday()+7,"MultiroomAudioController_getReadings", $hash, 0);
     InternalTimer(gettimeofday()+8,"MultiroomAudioController_setNotifyDef", $hash, 0);
@@ -196,7 +200,22 @@ sub MultiroomAudioController_Set($@) {
 		return undef;
 	}
 	if($cmd eq "forward" || $cmd eq "rewind"){
-        CallFn($soundname,"SetFn",$defs{$soundname},$soundname,$cmd);		
+        my ($elapsed,$total) = split (":",ReadingsVal($name,"time",""));
+        if( not defined($total) || not $total > 0){
+            return undef;
+        }
+        my $percent = $elapsed / $total;
+        my $step = 0.01*(0.01*AttrVal($name,"seekStepSmallThreshold",0) > $percent ? AttrVal($name,"seekStepSmall",3) : AttrVal($name,"seekStep",7));
+        Log3 $name,3,"MAC2: $elapsed, $total, $percent";
+        $percent +=$step if $cmd eq "forward";
+        $percent -=$step if $cmd eq "rewind";
+        $percent = 0  if $percent<0;
+        $percent = 0.99 if $percent > 0.99;
+        my $newint=int($percent*$total);
+        my $new=$percent*$total;
+        Log3 $name,3,"MAC2: $step, $elapsed, $total, $percent, $new, $newint";
+
+        CallFn($soundname,"SetFn",$defs{$soundname},$soundname,"seekcur",int($percent*$total));       
         return undef;
 	}
 	if($cmd eq "random"){
@@ -248,6 +267,7 @@ sub MultiroomAudioController_Set($@) {
         # TODO: load the state file for the playlistname
         # load the playlist
         CallFn($soundname,"SetFn",$defs{$soundname},$soundname,"playlist",${$hash->{PLARRAY}}[$indexes[$currentindex]]);
+        Log3 $name,3,"MAC2: CallFn $soundname, SetFn, ".$defs{$soundname}.", $soundname, playlist, ".${$hash->{PLARRAY}}[$indexes[$currentindex]];
         readingsSingleUpdate($hash,"playlistnumber",$indexes[$currentindex],1);
         CallFn($soundname,"SetFn",$defs{$soundname},$soundname,"play");       
         Log3 $name,3,"MAC2: ". $currentindex;
