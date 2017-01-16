@@ -49,7 +49,7 @@ my %Snapcast_client_sets = (
     "volume"   => 1,
     "stream"   => 1,
     "name"     => 1,
-    "mute"    => 1,
+    "mute"    => 0,
     "latency"    => 1,
 );
 
@@ -227,7 +227,7 @@ sub Snapcast_Read($)
   $buf = $hash->{PARTIAL} . $buf;
   
   my $lastchr = substr( $buf, -1, 1 );
-  if ( $lastchr ne "\n" || $buf!~/\}$/) {
+  if ( $lastchr ne "\n") {
       $hash->{PARTIAL} = $buf;
       Log3( $hash, 5, "snap: partial command received" );
       return;
@@ -492,6 +492,10 @@ sub Snapcast_SetClient($$$$){
 			$value=ReadingsVal($name,"streams_".$newstream."_id","");
 		}
 	}
+  if($param eq "mute" && (not (defined($value)) || $value eq '')){
+       my $muteState = ReadingsVal($name,"clients_".$id."_mute","");
+       $value = $muteState eq "true" || $muteState ==1 ? "false" : "true";
+  }
   # check if volume was given as increment or decrement, then find out current volume and calculate new volume
   if($param eq "volume" && $value=~/^([\+\-])(\d{1,2})$/){
     my $direction = $1;
@@ -505,11 +509,13 @@ sub Snapcast_SetClient($$$$){
   # if volume is given with up or down argument, then increase or decrease according to volumeStepSize
   if($param eq "volume" && $value=~/^(up|down)$/){
     my $currentVol = ReadingsVal($name,"clients_".$id."_volume","");
+    my $muteState = ReadingsVal($name,"clients_".$id."_mute","");
     return undef unless defined($currentVol);
     my $step=AttrVal($name,"volumeStepSize",5);
     if ($value eq "up"){$value = $currentVol + $step;}else{$value = $currentVol - $step;}
     $value = 100 if ($value >= 100);
     $value = 0 if ($value <0);
+    Snapcast_SetClient($hash,$id,"mute","false") if $value > 0 && ($muteState eq "true" || $muteState ==1) ;
   }
 	if(looks_like_number($value)){
 		$paramset->{"$param"} = $value+0;
@@ -667,9 +673,10 @@ sub Snapcast_isPmInstalled($$)
                   Set the volume of a client. For this and all the following 4 options, give client as second parameter (only for the server module), either as name, IP , or MAC and the desired value as third parameter. 
                   Client can be given as "all", in that case all clients are changed at once (only for server module)<br>
                   Volume can be given in 3 ways: Range betwee 0 and 100 to set volume directly. Increment or Decrement given between -100 and +100. Keywords <em>up</em> and <em>down</em> to increase or decrease with a predifined step size. 
-                  The step size can be defined in the attribute <em>volumeStepSize</em></li>
+                  The step size can be defined in the attribute <em>volumeStepSize</em><br>
+                  Setting a volume bigger than 0 also unmutes the client, if muted.</li>
               <li><i>mute</i><br>
-                  Mute or unmute by giving "true" or "false" as value. Use "toggle" to toggle between muted and unmuted.</li>
+                  Mute or unmute by giving "true" or "false" as value. If no argument given,  toggle between muted and unmuted.</li>
               <li><i>latency</i><br>
                   Change the Latency Setting of the client</li>
               <li><i>name</i><br>
