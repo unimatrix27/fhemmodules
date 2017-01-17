@@ -75,7 +75,7 @@ sub Snapcast_Initialize($) {
 	$hash->{ReadyFn}    = 'Snapcast_Ready';
     $hash->{AttrFn}     = 'Snapcast_Attr';
     $hash->{ReadFn}     = 'Snapcast_Read';
-    $hash->{TIMEOUT}	= 0.1;
+    $hash->{TIMEOUT}	= 1;
     $hash->{AttrList} =
           "streamnext:all,playing constraintDummy volumeStepSize "
         . $readingFnAttributes;
@@ -106,7 +106,7 @@ sub Snapcast_Define($$) {
     DevIo_CloseDev($hash);
     $hash->{DeviceName} = $hash->{ip}.":".$hash->{port};
     $attr{$name}{volumeStepSize} = '5' unless (exists($attr{$name}{volumeStepSize}));
-    
+    delete($hash->{"IDLIST"});
     Snapcast_Connect($hash);
     return undef;
 }
@@ -221,6 +221,7 @@ sub Snapcast_Read($)
   my ($hash) = @_;
   my $name = $hash->{NAME};
   my $buf;
+  Log3 $name,3,"SNAP. Read";
   
   $buf = DevIo_SimpleRead($hash);
     return "" if ( !defined($buf) );
@@ -231,43 +232,85 @@ sub Snapcast_Read($)
       $hash->{PARTIAL} = $buf;
       Log3( $hash, 5, "snap: partial command received" );
       return;
-  }
-  else {
+  }else {
       $hash->{PARTIAL} = "";
   }
-
   my @lines = split( "\n", $buf );
   foreach my $line (@lines) {
     # Hier die Results parsen
-    Log3 $name, 3, $line;
     my $decoded_json;
     eval {
-      $decoded_json = decode_json($line);
+      $decoded_json = decode_json($buf);
       1;
     } or do {
     # Decode JSON died, probably because of incorrect JSON from Snapcast. 
-      Log3 $name,2, "Invalid Response from Snapcast,ignoring result: $line";
-      readingsSingleUpdate($hash,"lastError","Invalid JSON: $line",1);
+      Log3 $name,2, "Invalid Response from Snapcast,ignoring result: $buf";
+      readingsSingleUpdate($hash,"lastError","Invalid JSON: $buf",1); 
       return undef;
     };
     my $update=$decoded_json;
-    if($update->{method}=~/Client\.OnDelete/){
+    if(defined ($hash->{"IDLIST"}->{$update->{id}})){
+      my $id=$update->{id};
+      if($hash->{"IDLIST"}->{$id}->{method} eq 'Server.GetStatus'){
+        delete $hash->{"IDLIST"}->{$id};
+        return Snapcast_ParseStatus($hash,$update);
+      }
+      if($hash->{"IDLIST"}->{$id}->{method} eq 'Server.DeleteClient'){
+        delete $hash->{"IDLIST"}->{$id};
+        return undef;
+      }
+      
+
+      while ( my ($key, $value) = each %Snapcast_clientmethods){ 
+        if($value eq $hash->{"IDLIST"}->{$id}->{method}){
+          my $client = $hash->{"IDLIST"}->{$id}->{params}->{client};
+          $client=~s/\://g;
+          $key=~s/mute/muted/g;
+          if($key eq "muted"){
+            $update->{result}  = $update->{result} ? "true" : "false";
+          }
+          #my $cnumber=1;
+          #while(defined($hash->{STATUS}->{clients}->{"$cnumber"}) && $c->{host}->{mac} ne $hash->{STATUS}->{clients}->{"$cnumber"}->{host}->{mac}){$cnumber++}
+          #    if (not defined ($hash->{STATUS}->{clients}->{"$cnumber"})) { 
+          #    Snapcast_GetStatus($hash);
+          #    return undef;
+          #}
+          #return undef unless defined ($result);
+          #$param=~s/id/stream/;
+          readingsBeginUpdate($hash); 
+          #readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_".$key,$update->{result} );
+          readingsBulkUpdateIfChanged($hash,"clients_".$client."_".$key,$update->{result} );
+          readingsEndUpdate($hash,1);
+          my $clientmodule = $hash->{$client};
+          my $clienthash=$defs{$clientmodule};
+          return undef unless defined ($clienthash);
+          readingsBeginUpdate($clienthash);
+          readingsBulkUpdateIfChanged($clienthash,$key,$update->{result} );
+          readingsEndUpdate($clienthash,1);
+        }
+      }
+      delete $hash->{"IDLIST"}->{$id};
+      return undef;
+    }
+    elsif($update->{method}=~/Client\.OnDelete/){
     	my $s=$update->{params}->{data};
     	fhem "deletereading $name clients.*";
     	Snapcast_GetStatus($hash);
     	return undef;
     }
-    if($update->{method}=~/Client\./){
+    elsif($update->{method}=~/Client\./){
     	my $c=$update->{params}->{data};
     	Snapcast_UpdateClient($hash,$c,0);
     	return undef;
     }
-    if($update->{method}=~/Stream\./){
+    elsif($update->{method}=~/Stream\./){
     	my $s=$update->{params}->{data};
     	Snapcast_UpdateStream($hash,$s,0);
     	return undef;
     }
-
+    Log3 $name,2,"unknown JSON, please ontact module maintainer: $buf";
+    readingsSingleUpdate($hash,"lastError","unknown JSON, please ontact module maintainer: $buf",1);
+    return "unknown JSON received"
   }
 }
 
@@ -363,8 +406,7 @@ sub Snapcast_DeleteClient($$$){
 	return undef unless defined($cnumber);
 	my $method="Server.DeleteClient";
 	$paramset->{client}=ReadingsVal($hash,"clients_".$id."_mac","");
-	my $result = Snapcast_Do($hash,$method,$paramset);
-	return undef unless defined ($result);
+	Snapcast_Do($hash,$method,$paramset);
 	readingsSingleUpdate($hash,"state","Client Deleted: $cnumber",1);
 	Snapcast_GetStatus($hash);
 }
@@ -419,8 +461,11 @@ sub Snapcast_GetStatus($){
   my ($hash) = @_;
   my $name = $hash->{NAME};
   
-  my $status=Snapcast_Do($hash,"Server.GetStatus",'');
-  return undef unless defined ($status);
+  return Snapcast_Do($hash,"Server.GetStatus",'');
+}
+
+sub Snapcast_ParseStatus($$){
+  my ($hash,$status) = @_;
   my $streams=$status->{result}->{streams};
   my $clients=$status->{result}->{clients};
   my $server=$status->{result}->{server};
@@ -493,7 +538,7 @@ sub Snapcast_SetClient($$$$){
 		}
 	}
   if($param eq "mute" && (not (defined($value)) || $value eq '')){
-       my $muteState = ReadingsVal($name,"clients_".$id."_mute","");
+       my $muteState = ReadingsVal($name,"clients_".$id."_muted","");
        $value = $muteState eq "true" || $muteState ==1 ? "false" : "true";
   }
   # check if volume was given as increment or decrement, then find out current volume and calculate new volume
@@ -522,58 +567,35 @@ sub Snapcast_SetClient($$$$){
 	}else{
 		$paramset->{"$param"} = $value
 	}
-	my $result = Snapcast_Do($hash,$method,$paramset);
-	return undef unless defined ($result);
-	$param=~s/id/stream/;
-	readingsBeginUpdate($hash);	
-	readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_".$param,$result->{result} );
-  readingsBulkUpdateIfChanged($hash,"clients_".$id."_".$param,$result->{result} );
-	readingsEndUpdate($hash,1);
-  my $clientmodule = $hash->{$id};
-  my $clienthash=$defs{$clientmodule};
-  return undef unless defined ($clienthash);
-  readingsBeginUpdate($clienthash);
-  readingsBulkUpdateIfChanged($clienthash,$param,$result->{result} );
-  readingsEndUpdate($clienthash,1);
+	 Snapcast_Do($hash,$method,$paramset);
+  return undef;
 }
 
 sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
   my $name = $hash->{NAME};
   $param = '' unless defined($param);
-  my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),1);
-  return undef unless defined($line);
-  if($line=~/error/){
-  	readingsSingleUpdate($hash,"lastError",$line,1);
-  	return undef;
-  }
-  my $decoded_json;
-  eval {
-    $decoded_json = decode_json($line);
-    1;
-  } or do {
-    # Decode JSON died, probably because of incorrect JSON from Snapcast. 
-    Log3 $name,2, "Invalid Response from Snapcast,ignoring result: $line";
-    readingsSingleUpdate($hash,"lastError","Invalid JSON: $line",1);
-    return undef;
-  };
-  return $decoded_json;
+  #my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),2);
+  return DevIo_SimpleWrite($hash,Snapcast_Encode($hash,$method,$param),2);
 } 
 
 sub Snapcast_Encode($$$){
   my ($hash,$method,$param) = @_;
   my $name = $hash->{NAME};
   if(defined($hash->{helper}{REQID})){$hash->{helper}{REQID}++;}else{$hash->{helper}{REQID}=1;}
+  $hash->{helper}{REQID} =1 if $hash->{helper}{REQID}>16383; # not sure if this is needed but we better dont let this grow forever
   my $request;
   my $json;
   $request->{jsonrpc}="2.0";
   $request->{method}=$method;
   $request->{id}=$hash->{helper}{REQID};
   $request->{params} = $param unless $param eq '';
-  Log3 $name,3,encode_json($request)."\r\n";
+  $hash->{"IDLIST"}->{$request->{id}} = $request;
+  $request->{id}=$request->{id}+0;
   $json=encode_json($request)."\r\n";
   $json =~s/\"true\"/true/;			# Snapcast needs bool values without "" but encode_json does not do this
   $json =~s/\"false\"/false/;
+  #$json =~s/\"\d+\"/false/;
   return $json;
 }
 
