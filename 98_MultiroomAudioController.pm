@@ -17,8 +17,6 @@ my %MultiroomAudioController_sets = (
     "mute"           =>2,
     "volup"          =>2,
     "voldown"        =>2,
-    "nextstream"     =>2,
-    "defaultstream"  =>2,
     "forward"        =>3,
     "rewind"         =>3,
     "next"           =>3,
@@ -26,17 +24,19 @@ my %MultiroomAudioController_sets = (
     "play"           =>3,
     "pause"	         =>3,
     "stop"	         =>3,
-    "random"           =>3,
-    "single"           =>3,
-    "repeat"           =>3,
+    "random"         =>3,
+    "single"         =>3,
+    "repeat"         =>3,
     "statesave"      =>3,
     "stateload"      =>3,
     "chanup"         =>3,
-    "chandown"         =>3,
+    "chandown"       =>3,
     "trackinfo"      =>3,
     "offtimer"       =>2,
-    "nextcontrol"	 =>2,
-    "defaultcontrol" =>2
+    "stream"     	 =>2,
+    "copystate"      =>2,
+    "control"        =>2,
+    "streamreset"    =>2
 );
 
 
@@ -50,7 +50,7 @@ sub MultiroomAudioController_Initialize($) {
     $hash->{AttrFn}     = 'MultiroomAudioController_Attr';
     $hash->{NotifyOrderPrefix} = "80-"; 
     $hash->{AttrList} =
-          "mrSystem:SNAPCAST soundSystem:MPD mr soundMapping tts numberHelper playlistPattern stateSaveDir seekStep seekDirect:percent,seconds seekStepSmall seekStepSmallThreshold"
+          "mrSystem:SNAPCAST soundSystem:MPD mr soundMapping ttsMapping defaultTts defaultStream defaultSound numberHelper playlistPattern stateSaveDir seekStep seekDirect:percent,seconds seekStepSmall seekStepSmallThreshold"
         . $readingFnAttributes;
 }
 
@@ -68,8 +68,6 @@ sub MultiroomAudioController_Define($$) {
     $attr{$name}{seekStepSmall}             = '2'                unless (exists($attr{$name}{seekStepSmall}));
     $attr{$name}{seekStepSmallThreshold}    = '8'                unless (exists($attr{$name}{seekStepSmallThreshold}));
     Log3 $name,3,"MAC DEFINED";
-    InternalTimer(gettimeofday()+7,"MultiroomAudioController_getReadings", $hash, 0);
-    InternalTimer(gettimeofday()+8,"MultiroomAudioController_setNotifyDef", $hash, 0);
     return undef;
 }
 
@@ -82,6 +80,7 @@ sub MultiroomAudioController_Attr($$){
     		$hash->{NOTIFYDEV}=$value;
     		$hash->{NOTIFYDEV} .= ",".$hash->{SOUND} if defined($hash->{SOUND}) and $hash->{SOUND} ne "";
     		MultiroomAudioController_getReadings($hash,$value);
+
     	}
     	if($attr eq "soundMapping"){
     		$hash->{soundMapping}=$value;
@@ -161,11 +160,16 @@ sub MultiroomAudioController_Set($@) {
 	return '"set Snapcast" needs at least one argument' if (int(@param) < 2);	
 	my $name = shift @param;
 	my $cmd = shift @param;
+    my $val = shift @param;
 	my $mrname=AttrVal($name,"mr","undefined");
 	my $numbername = AttrVal($name,"numberHelper","undefined");
-	my $soundname=$hash->{SOUND};
-	my $mrhash=$defs{$mrname};
-	my $soundhash=$defs{$soundname};
+	my $soundname= defined($hash->{SOUND}) ? $hash->{SOUND} : '' ;
+    if (not defined($defs{$soundname})){
+        MultiroomAudioController_setNotifyDef($hash) if not defined($defs{$soundname});
+	   $soundname= defined($hash->{SOUND}) ? $hash->{SOUND} : '' ;
+    }
+    my $mrhash=$defs{$mrname};
+    my $soundhash= defined ($defs{$soundname}) ? $defs{$soundname} : '';
 	my $soundtyp=AttrVal($name,"soundSystem","");
 	my $soundModuleHash=$modules{$soundtyp};
 	my $numberHash=$defs{$numbername};
@@ -176,9 +180,9 @@ sub MultiroomAudioController_Set($@) {
 	}
 	# clear:noArg clear_readings:noArg mpdCMD next:noArg outputenabled0:0,1 pause:noArg play playfile playlist previous:noArg random:noArg repeat:noArg reset:noArg single:noArg stop:noArg toggle:noArg updateDb:noArg volume:slider,0,1,100 volumeDown:noArg volumeUp:noArg
 	return MultiroomAudioController_Error($hash,"no sound backend connected or soundsystem not defined, check soundMapping and soundSystem attributes",1)
-		if $MultiroomAudioController_sets{$cmd}>2 && (not defined ($soundhash) || not defined ($soundModuleHash));
-	return MultiroomAudioController_Error($hash,"no multiroom backend connected, check mr attribute",1) if $MultiroomAudioController_sets{$cmd}>1 && not defined ($mrhash);
-	return MultiroomAudioController_Error($hash,"no numberHelper backend connected, check numberHelper attribute",1) if $MultiroomAudioController_sets{$cmd}==1 && not defined ($numberHash);
+		if $MultiroomAudioController_sets{$cmd}>2 && (not defined ($soundhash) || $soundhash eq '' || not defined ($soundModuleHash) || $soundModuleHash eq '');
+	return MultiroomAudioController_Error($hash,"no multiroom backend connected, check mr attribute",1) if $MultiroomAudioController_sets{$cmd}>1 && (!defined ($mrhash) || $mrhash eq '');
+	return MultiroomAudioController_Error($hash,"no numberHelper backend connected, check numberHelper attribute",1) if ($MultiroomAudioController_sets{$cmd}==1 && ( !defined ($numberHash) || $numberHash eq ''));
 	if($cmd eq "play"){
 		CallFn($soundname,"SetFn",$defs{$soundname},$soundname,$cmd);
 		return undef
@@ -201,7 +205,8 @@ sub MultiroomAudioController_Set($@) {
 	}
 	if($cmd eq "forward" || $cmd eq "rewind"){
         my ($elapsed,$total) = split (":",ReadingsVal($name,"time",""));
-        if( not defined($total) || not $total > 0){
+        $total=int($total);
+        if( not defined($total) || $total <= 0){
             return undef;
         }
         my $percent = $elapsed / $total;
@@ -252,8 +257,9 @@ sub MultiroomAudioController_Set($@) {
             MultiroomAudioController_pushPlArray($hash,$item);
         }
         # next 3 lines, build an array of pl numbers, get the number of the current one and its index in the index array. This could probably be done better. 
+        my $mpdplaylist = defined ($soundhash->{'.playlist'}) ? $soundhash->{'.playlist'} : '';
         my (@indexes) = grep { defined(${$hash->{PLARRAY}}[$_]) } (0 .. @{$hash->{PLARRAY}});
-        my ($current) = grep { ${$hash->{PLARRAY}}[$_] eq $soundhash->{'.playlist'} } (0 .. @{$hash->{PLARRAY}});
+        my ($current) = grep { ${$hash->{PLARRAY}}[$_] eq $mpdplaylist } (0 .. @{$hash->{PLARRAY}});
         my ($currentindex) = grep { defined($current) && defined($indexes[$_]) && $indexes[$_] eq $current } (0 .. @indexes-1);
 
         # for next or prev, just increase the number or decrease the number based on $cmd, call getPlName(number)
@@ -293,6 +299,37 @@ sub MultiroomAudioController_Set($@) {
         return undef;
     }
 
+    if($cmd eq "stream"){
+        my $targetStream="";
+        if(defined($val)){
+            $targetStream = $val;
+        }
+        return undef if $targetStream eq "";
+        CallFn($mrname,"SetFn",$defs{$mrname},$mrname,"stream",$targetStream);
+        return undef;
+    }
+
+    if($cmd eq "copystate"){
+        my $defaultstream = AttrVal($name,"defaultStream","");
+        return undef if $defaultstream eq "";
+        CallFn($mrname,"SetFn",$defs{$mrname},$mrname,"stream",$defaultstream);
+        return undef;
+    }
+
+    if($cmd eq "control"){
+        my $defaultstream = AttrVal($name,"defaultStream","");
+        return undef if $defaultstream eq "";
+        CallFn($mrname,"SetFn",$defs{$mrname},$mrname,"stream",$defaultstream);
+        return undef;
+    }
+    if($cmd eq "streamreset"){
+        my $defaultstream = AttrVal($name,"defaultStream","");
+        return undef if $defaultstream eq "";
+        CallFn($mrname,"SetFn",$defs{$mrname},$mrname,"stream",$defaultstream);
+        return undef;
+    }
+
+
 
 
 
@@ -320,7 +357,7 @@ sub MultiroomAudioController_Error($$$){ # hier noch TTS feedback einbauen je na
  	my ($hash, $module) = @_;
  	my $name = $hash->{NAME};
     if (!$init_done){
-      InternalTimer(gettimeofday()+5,"MultiroomAudioController_getReadings", $hash, 0);
+      InternalTimer(gettimeofday()+10,"MultiroomAudioController_getReadings", $hash, $module);
       return "init not done";
     }
  	return undef unless defined($defs{$module});
@@ -346,6 +383,9 @@ sub MultiroomAudioController_Error($$$){ # hier noch TTS feedback einbauen je na
  	}
  	readingsEndUpdate($hash,1);
  	MultiroomAudioController_setNotifyDef($hash) if $updateFlag == 1;
+    if(ReadingsVal($name,"stream","") eq "" && $module eq AttrVal($name,"mr","")){
+        InternalTimer(gettimeofday()+10,"MultiroomAudioController_getReadings", $hash, $module);
+    }
  	return undef;
  }
 
