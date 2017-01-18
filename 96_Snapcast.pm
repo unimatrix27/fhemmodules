@@ -22,45 +22,42 @@
 #  GNU General Public License for more details.
 ################################################################
 
+# This module is used to control a Snapcast Server https://github.com/badaix/snapcast
+# This version is tested against https://github.com/badaix/snapcast/tree/98be8a58d945f84af50e40ebcf8a774592dd6e7b
+# Future developments beyond this revision are not necessarily supported. 
+# The module uses DevIo for communication. There is no blocking communication whatsoever. 
+# Communication to Snapcast goes through a TCP Socket, Writing and Reading are managed asynchronously.
+# It is necessary to have  JSON module installed. If not, the module will detect this and put a message in the log file.
+
 package main;
 use strict;
 use warnings;
 use Scalar::Util qw(looks_like_number);
-
-my $Snapcast_LogLevelDebug = 1;
-my $Snapcast_LogLevelNormal = 1;
-my $Snapcast_LogLevelCritical =1;
-
-
-my %Snapcast_gets = (
-	"tbd"	=> "x"
-);
 
 my %Snapcast_sets = (
     "update"   => 0,
     "volume"   => 2,
     "stream"   => 2,
     "name"	   => 2,
-    "mute"    => 2,
-    "latency"    => 2,
+    "mute"     => 2,
+    "latency"  => 2,
 );
 
 my %Snapcast_client_sets = (
     "volume"   => 1,
     "stream"   => 1,
     "name"     => 1,
-    "mute"    => 0,
-    "latency"    => 1,
+    "mute"     => 0,
+    "latency"  => 1,
 );
 
-
 my %Snapcast_clientmethods = (
-    "name"   => "Client.SetName",
-    "volume"   => "Client.SetVolume",
-    "mute"   => "Client.SetMute",
-	"stream"   => "Client.SetStream",
-	"latency"   => "Client.SetLatency",
-	"volumeConstraint" => "internal"
+    "name"             => "Client.SetName",
+    "volume"           => "Client.SetVolume",
+    "mute"             => "Client.SetMute",
+	  "stream"           => "Client.SetStream",
+	  "latency"          => "Client.SetLatency",
+	  "volumeConstraint" => "internal"
 );
 
 
@@ -71,11 +68,10 @@ sub Snapcast_Initialize($) {
     $hash->{UndefFn}    = 'Snapcast_Undef';
     $hash->{SetFn}      = 'Snapcast_Set';
     $hash->{GetFn}      = 'Snapcast_Get';
-	$hash->{WriteFn}    = 'Snapcast_Write';
-	$hash->{ReadyFn}    = 'Snapcast_Ready';
+	  $hash->{WriteFn}    = 'Snapcast_Write';
+	  $hash->{ReadyFn}    = 'Snapcast_Ready';
     $hash->{AttrFn}     = 'Snapcast_Attr';
     $hash->{ReadFn}     = 'Snapcast_Read';
-    $hash->{TIMEOUT}	= 1;
     $hash->{AttrList} =
           "streamnext:all,playing constraintDummy volumeStepSize "
         . $readingFnAttributes;
@@ -134,7 +130,6 @@ sub Snapcast_Attr($$){
       return "volumeStepSize needs to be a number between 1 and 100" unless $value>0 && $value <=100;
     }
   }
-  
 	return undef;
 }
 
@@ -150,29 +145,16 @@ sub Snapcast_Undef($$) {
 
 
 sub Snapcast_Get($@) {
-	my ($hash, @param) = @_;
-	return '"get Snapcast" needs at least one argument' if (int(@param) < 2);
-	
-	my $name = shift @param;
-	my $opt = shift @param;
-	if(!$Snapcast_gets{$opt}) {
-		my @cList = keys %Snapcast_gets;
-		return "Unknown argument $opt, choose one of " . join(" ", @cList);
-	}
-	return "to be defined";  
+	return "get is not supported by this module";
 }
 
 sub Snapcast_Set($@) {
 	my ($hash, @param) = @_;
-	
 	return '"set Snapcast" needs at least one argument' if (int(@param) < 2);
-	
 	my $name = shift @param;
 	my $opt = shift @param;
 	my $value = join(" ", @param);
   my %sets = ($hash->{MODE} eq "client") ? %Snapcast_client_sets : %Snapcast_sets;
-
-
 	if(!defined($sets{$opt})) {
     my @cList = keys %sets;
 		return "Unknown argument $opt, choose one of " . join(" ", @cList);
@@ -206,27 +188,22 @@ sub Snapcast_Set($@) {
       }
 			return undef;
 		}
-		Log3 $name,3,"SetClient $hash, $client, $opt, $value";
+		Log3 $name,5,"SetClient $hash, $client, $opt, $value";
     my $res = Snapcast_SetClient($hash,$client,$opt,$value);
 		readingsSingleUpdate($hash,"lastError",$res,1) if defined ($res);
 		return undef;
 	}
-
-
-	return "$opt not yet implemented";
+	return "$opt not implemented";
 }
 
-sub Snapcast_Read($)
-{
+sub Snapcast_Read($){
   my ($hash) = @_;
   my $name = $hash->{NAME};
   my $buf;
-  Log3 $name,3,"SNAP. Read";
-  
+  Log3 $name,5,"SNAP. Read";
   $buf = DevIo_SimpleRead($hash);
     return "" if ( !defined($buf) );
   $buf = $hash->{PARTIAL} . $buf;
-  
   my $lastchr = substr( $buf, -1, 1 );
   if ( $lastchr ne "\n") {
       $hash->{PARTIAL} = $buf;
@@ -259,8 +236,6 @@ sub Snapcast_Read($)
         delete $hash->{"IDLIST"}->{$id};
         return undef;
       }
-      
-
       while ( my ($key, $value) = each %Snapcast_clientmethods){ 
         if($value eq $hash->{"IDLIST"}->{$id}->{method}){
           my $client = $hash->{"IDLIST"}->{$id}->{params}->{client};
@@ -315,8 +290,7 @@ sub Snapcast_Read($)
 }
 
 
-sub Snapcast_Ready($)
-{
+sub Snapcast_Ready($){
   my ($hash) = @_;
   my $name = $hash->{NAME};
   if (AttrVal($hash->{NAME}, 'disable', 0)) {
@@ -328,7 +302,6 @@ sub Snapcast_Ready($)
         DevIo_OpenDev($hash, 1,"Snapcast_OnConnect");
         return;
     }
-
   return undef;
 }
 
@@ -395,8 +368,6 @@ sub Snapcast_UpdateClient($$$){
   readingsEndUpdate($clienthash,1);
   return undef;
 }
-
-
 
 sub Snapcast_DeleteClient($$$){
 	my ($hash,$id) = @_;
@@ -609,7 +580,6 @@ sub Snapcast_getStreamNumber($$){
 	}
 	return undef;
 }
-
 
 sub Snapcast_getId($$){
 	my ($hash,$client) = @_;
