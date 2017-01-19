@@ -63,7 +63,7 @@ my %Snapcast_clientmethods = (
 
 sub Snapcast_Initialize($) {
     my ($hash) = @_;
-	  require "$attr{global}{modpath}/FHEM/DevIo.pm";
+	  use DevIo;
     $hash->{DefFn}      = 'Snapcast_Define';
     $hash->{UndefFn}    = 'Snapcast_Undef';
     $hash->{SetFn}      = 'Snapcast_Set';
@@ -73,7 +73,7 @@ sub Snapcast_Initialize($) {
     $hash->{AttrFn}     = 'Snapcast_Attr';
     $hash->{ReadFn}     = 'Snapcast_Read';
     $hash->{AttrList} =
-          "streamnext:all,playing constraintDummy volumeStepSize "
+          "streamnext:all,playing constraintDummy volumeStepSize volumeStepSizeSmall volumeStepSizeThreshold"
         . $readingFnAttributes;
 }
 
@@ -91,7 +91,9 @@ sub Snapcast_Define($$) {
         readingsSingleUpdate($hash,"state","defined",1);
         RemoveInternalTimer($hash);
         DevIo_CloseDev($hash);
-        $attr{$name}{volumeStepSize} = '5' unless (exists($attr{$name}{volumeStepSize}));
+        $attr{$name}{volumeStepSize}          = '5' unless (exists($attr{$name}{volumeStepSize}));
+        $attr{$name}{volumeStepSizeSmall}     = '1' unless (exists($attr{$name}{volumeStepSizeSmall}));
+        $attr{$name}{volumeStepSizeThreshold} = '5' unless (exists($attr{$name}{volumeStepSizeThreshold}));
         return Snapcast_Client_Register_Server($hash);
     }
     $hash->{ip} = (defined($a[2])) ? $a[2] : "localhost"; 
@@ -128,6 +130,12 @@ sub Snapcast_Attr($$){
 	  }
     if($attr eq "volumeStepSize"){
       return "volumeStepSize needs to be a number between 1 and 100" unless $value>0 && $value <=100;
+    }
+    if($attr eq "volumeStepSizeSmall"){
+      return "volumeStepSizeSmall needs to be a number between 1 and 100" unless $value>0 && $value <=100;
+    }
+    if($attr eq "volumeStepSizeThreshold"){
+      return "volumeStepSizeThreshold needs to be a number between 0 and 100" unless $value>=0 && $value <=100;
     }
   }
 	return undef;
@@ -183,12 +191,15 @@ sub Snapcast_Set($@) {
 		return "client not found, use unique name, IP, or MAC as client identifier" unless defined($client);
 		if($client eq "all"){
 			for(my $i=1;$i<=ReadingsVal($name,"clients",0);$i++){
-				my $res = Snapcast_SetClient($hash,ReadingsVal($name,"clients_".$i."_id",""),$opt,$value);
+        my $client = $hash->{STATUS}->{clients}->{"$i"}->{host}->{mac};
+				$client=~s/\://g;
+        my $res = Snapcast_SetClient($hash,$client,$opt,$value);
+        Log3 $name,3,"SNAP SetClient $client, $opt, $value";
 				readingsSingleUpdate($hash,"lastError",$res,1) if defined ($res);
       }
 			return undef;
 		}
-		Log3 $name,5,"SetClient $hash, $client, $opt, $value";
+		Log3 $name,2,"SetClient $hash, $client, $opt, $value";
     my $res = Snapcast_SetClient($hash,$client,$opt,$value);
 		readingsSingleUpdate($hash,"lastError",$res,1) if defined ($res);
 		return undef;
@@ -330,16 +341,8 @@ sub Snapcast_UpdateClient($$$){
 	$hash->{STATUS}->{clients}->{"$cnumber"}=$c;
   my $id=$c->{id}? $c->{id} : $c->{host}->{mac};    # protocol version 2 has no id, but just the MAC, newer versions will have an ID. 
   $id=~s/\://g;
+  $hash->{STATUS}->{clients}->{"$cnumber"}->{id}=$id;
  	readingsBeginUpdate($hash);
- 	  readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_online",$c->{connected} ? 'true' : 'false' );
- 	  readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_name",$c->{config}->{name} ? $c->{config}->{name} : $c->{host}->{name} );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_latency",$c->{config}->{latency} );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_stream",$c->{config}->{stream} );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_volume",$c->{config}->{volume}->{percent} );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_muted",$c->{config}->{volume}->{muted} ? 'true' : 'false' );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_ip",$c->{host}->{ip} );
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_mac",$c->{host}->{mac});
-    readingsBulkUpdateIfChanged($hash,"clients_".$cnumber."_id",$id);
 
     readingsBulkUpdateIfChanged($hash,"clients_".$id."_online",$c->{connected} ? 'true' : 'false' );
     readingsBulkUpdateIfChanged($hash,"clients_".$id."_name",$c->{config}->{name} ? $c->{config}->{name} : $c->{host}->{name} );
@@ -527,7 +530,7 @@ sub Snapcast_SetClient($$$$){
     my $currentVol = ReadingsVal($name,"clients_".$id."_volume","");
     my $muteState = ReadingsVal($name,"clients_".$id."_mute","");
     return undef unless defined($currentVol);
-    my $step=AttrVal($name,"volumeStepSize",5);
+    my $step = AttrVal($name,"volumeStepSizeThreshold",0) > $currentVol ? AttrVal($name,"volumeStepSizeSmall",3) : AttrVal($name,"volumeStepSize",7);
     if ($value eq "up"){$value = $currentVol + $step;}else{$value = $currentVol - $step;}
     $value = 100 if ($value >= 100);
     $value = 0 if ($value <0);
@@ -546,7 +549,6 @@ sub Snapcast_Do($$$){
   my ($hash,$method,$param) = @_;
   my $name = $hash->{NAME};
   $param = '' unless defined($param);
-  #my $line = DevIo_Expect( $hash,Snapcast_Encode($hash,$method,$param),2);
   return DevIo_SimpleWrite($hash,Snapcast_Encode($hash,$method,$param),2);
 } 
 
@@ -583,26 +585,28 @@ sub Snapcast_getStreamNumber($$){
 
 sub Snapcast_getId($$){
 	my ($hash,$client) = @_;
-	my $name = $hash->{NAME};
+  my $name = $hash->{NAME};
+  Log3 $name,3,"getId $client";
 	if($client=~/^([0-9a-f]{2}([:-]|$)){6}$/i){ # client is already a MAC
 		for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
-      if ($client eq ReadingsVal($name,"clients_".$i."_mac","")){
-        return ReadingsVal($name,"clients_".$i."_id","");
+      if ($client eq $hash->{STATUS}->{clients}->{"$i"}->{host}->{mac}) {
+        return $hash->{STATUS}->{clients}->{"$i"}->{id};
       }
     }
 	}
 	if($client =~ qr/^(?!(\.))(\.?(\d{1,3})(?(?{$^N > 255})(*FAIL))){4}$/){ # client is given as IP address
 		for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
-			if ($client eq ReadingsVal($name,"clients_".$i."_ip","")){
-				return ReadingsVal($name,"clients_".$i."_id","");
-			}
+    if ($client eq $hash->{STATUS}->{clients}->{"$i"}->{host}->{ip}) {
+        return $hash->{STATUS}->{clients}->{"$i"}->{id};
+      }
 		}
 	}
 	for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
-		if ($client eq ReadingsVal($name,"clients_".$i."_name","")){
-			return ReadingsVal($name,"clients_".$i."_id","");
-		}
+		if ($client eq $hash->{STATUS}->{clients}->{"$i"}->{config}->{name}) {
+        return $hash->{STATUS}->{clients}->{"$i"}->{id};
+      }
 	}
+  return "unknown client";
 }
 
 sub Snapcast_isPmInstalled($$)
@@ -666,6 +670,8 @@ sub Snapcast_isPmInstalled($$)
                   Client can be given as "all", in that case all clients are changed at once (only for server module)<br>
                   Volume can be given in 3 ways: Range betwee 0 and 100 to set volume directly. Increment or Decrement given between -100 and +100. Keywords <em>up</em> and <em>down</em> to increase or decrease with a predifined step size. 
                   The step size can be defined in the attribute <em>volumeStepSize</em><br>
+                  The step size can be defined smaller for the lower volume range, so that finetuning is possible in this area.
+                  See the description of the attributes <em>volumeStepSizeSmall</em> and <em>volumeStepThreshold</em>
                   Setting a volume bigger than 0 also unmutes the client, if muted.</li>
               <li><i>mute</i><br>
                   Mute or unmute by giving "true" or "false" as value. If no argument given,  toggle between muted and unmuted.</li>
@@ -688,6 +694,12 @@ sub Snapcast_isPmInstalled($$)
     </li>
     <li>volumeStepSize<br>
       Default: 5. Set this to define, how far the volume is changed when using up/down volume commands. 
+    </li>
+    <li>volumeStepThreshold<br>
+      Default: 7. When the volume is below this threshold, then the volumeStepSizeSmall setting is used for volume steps, rather than the normal volumeStepSize. 
+    </li>
+    <li>volumeStepSizeSmall<br>
+      Default: 1. This typically smaller step size is used when using "volume up" or "volume down" and the current volume is smaller than the threshold. 
     </li>
         <li>constraintDummy<br>
     Links the Snapcast module to a dummy. The value of the dummy is then used as a selector for different sets of volumeConstraints. See the description of the volumeConstraint command. (not yet implemented)
