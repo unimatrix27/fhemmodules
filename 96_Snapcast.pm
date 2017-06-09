@@ -1,6 +1,6 @@
 ################################################################
 #
-#  $Id$
+#  $Id: 96_Snapcast.pm 13205 2017-01-23 11:57:46Z unimatrix $
 #
 #  Maintainer: Sebatian Stuecker / FHEM Forum: unimatrix / Github: unimatrix27
 #  
@@ -441,33 +441,43 @@ sub Snapcast_getStatus($){
 
 sub Snapcast_parseStatus($$){
   my ($hash,$status) = @_;
-  my $streams=$status->{result}->{streams};
-  my $clients=$status->{result}->{clients};
-  my $server=$status->{result}->{server};
+  my $streams=$status->{result}->{server}->{streams};
+  #my $clients=$status->{result}->{clients}; # old snapcast format up to 0.10
+  my $groups=$status->{result}->{server}->{groups};
+  my $server=$status->{result}->{server}->{server};
 
   
   $hash->{STATUS}->{server}=$server;
-  if(defined ($clients)){
-  	my @clients=@{$clients};
-  	my $cnumber=1;
-  	foreach my $c(@clients){
-	  	Snapcast_updateClient($hash,$c,$cnumber);
-	  	$cnumber++;
-  	}
-  	readingsBeginUpdate($hash);	
-    readingsBulkUpdateIfChanged($hash,"clients",$cnumber-1 );
-    readingsEndUpdate($hash,1);
+  if(defined ($groups)){
+    my @groups=@{$groups};
+    my $gnumber=1;
+    foreach my $g(@groups){
+      my $groupstream=$g->{stream_id};
+      my $clients=$g->{clients};
+      if(defined ($clients)){
+        my @clients=@{$clients};
+        my $cnumber=1;
+        foreach my $c(@clients){
+          $c->{config}->{stream} = $groupstream; # insert "stream" field for every client
+          Snapcast_updateClient($hash,$c,$cnumber);
+          $cnumber++;
+        }
+        readingsBeginUpdate($hash); 
+        readingsBulkUpdateIfChanged($hash,"clients",$cnumber-1 );
+        readingsEndUpdate($hash,1);
+      }
+    }
   }
   if(defined ($streams)){
-  	my @streams=@{$streams} unless not defined ($streams);
-  	my $snumber=1;
-  	foreach my $s(@streams){
-	  	Snapcast_updateStream($hash,$s,$snumber);
-	  	$snumber++;
-  	}
-  	readingsBeginUpdate($hash);	
-  	readingsBulkUpdateIfChanged($hash,"streams",$snumber-1 );
-  	readingsEndUpdate($hash,1);
+    my @streams=@{$streams} unless not defined ($streams);
+    my $snumber=1;
+    foreach my $s(@streams){
+      Snapcast_updateStream($hash,$s,$snumber);
+      $snumber++;
+    }
+    readingsBeginUpdate($hash); 
+    readingsBulkUpdateIfChanged($hash,"streams",$snumber-1 );
+    readingsEndUpdate($hash,1);
   }
     InternalTimer(gettimeofday() + 300, "Snapcast_getStatus", $hash, 1); # every minute, get the full update, also to apply changed vol constraints. 
 }
