@@ -288,7 +288,7 @@ sub Snapcast_Read($){
               #Log3 $name,2, "client_group: $client_group ";
               if ($group eq $client_group) {          
                 readingsBeginUpdate($hash); 
-                readingsBulkUpdateIfChanged($hash,"clients_".$client."_stream",$update->{result}->{stream_id} );
+                readingsBulkUpdateIfChanged($hash,"clients_".$client."_stream_id",$update->{result}->{stream_id} );
                 readingsEndUpdate($hash,1);
               }
             }
@@ -558,7 +558,7 @@ sub Snapcast_setClient($$$$){
     $param="stream_id";
     if($value eq "next"){ # just switch to the next stream, if last stream, jump to first one. This way streams can be cycled with a button press
       my $totalstreams=ReadingsVal($name,"streams","");
-      my $currentstream = ReadingsVal($name,"clients_".$id."_stream","");
+      my $currentstream = ReadingsVal($name,"clients_".$id."_stream_id","");
       $currentstream = Snapcast_getStreamNumber($hash,$currentstream);
       my $newstream = $currentstream+1;
       $newstream=1 unless $newstream <= $totalstreams;
