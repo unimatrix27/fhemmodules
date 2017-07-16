@@ -231,6 +231,7 @@ sub Snapcast_Read($){
 
   my @lines = split( /\n/, $buf );
   foreach my $line (@lines) {
+    #Log3 $name,2, "line: $line ";
     # Hier die Results parsen
     my $decoded_json;
     eval {
@@ -245,6 +246,7 @@ sub Snapcast_Read($){
     my $update=$decoded_json;
     if(defined ($hash->{"IDLIST"}->{$update->{id}})){
       my $id=$update->{id};
+      #Log3 $name,2, "id: $id ";
       if($hash->{"IDLIST"}->{$id}->{method} eq 'Server.GetStatus'){
         delete $hash->{"IDLIST"}->{$id};
         return Snapcast_parseStatus($hash,$update);
@@ -257,6 +259,9 @@ sub Snapcast_Read($){
         if(($value eq $hash->{"IDLIST"}->{$id}->{method}) && $key ne "mute"){ #exclude mute here because muting is now integrated in SetVolume
           #my $client = $hash->{"IDLIST"}->{$id}->{params}->{client};
           my $client = $hash->{"IDLIST"}->{$id}->{params}->{id};
+          #Log3 $name,2, "client: $client ";
+          #Log3 $name,2, "key: $key ";
+          #Log3 $name,2, "value: $value ";
 
           $client=~s/\://g;
           #$key=~s/mute/muted/g;
@@ -264,10 +269,12 @@ sub Snapcast_Read($){
           #  $update->{result}  = $update->{result} ? "true" : "false";
           #}
           if($key eq "volume"){
-            my $temp_percent = $update->{result}->{volume}->{percent};
+            #my $temp_percent = $update->{result}->{volume}->{percent};
+            #my $temp_muted = $update->{result}->{volume}->{muted}  ? 'true' : 'false';
             #Log3 $name,2, "percent: $temp_percent ";
+            #Log3 $name,2, "muted: $temp_muted ";
             readingsBeginUpdate($hash); 
-            readingsBulkUpdateIfChanged($hash,"clients_".$client."_muted",$update->{result}->{volume}->{muted} );
+            readingsBulkUpdateIfChanged($hash,"clients_".$client."_muted",$update->{result}->{volume}->{muted}  ? 'true' : 'false');
             readingsBulkUpdateIfChanged($hash,"clients_".$client."_volume",$update->{result}->{volume}->{percent} );
             readingsEndUpdate($hash,1);
             my $clientmodule = $hash->{$client};
@@ -284,7 +291,6 @@ sub Snapcast_Read($){
             for(my $i=1;$i<=ReadingsVal($name,"clients",1);$i++){
               $client = $hash->{STATUS}->{clients}->{"$i"}->{id};
               my $client_group = ReadingsVal($hash->{NAME},"clients_".$client."_group","");
-              #Log3 $name,2, "client: $client ";
               #Log3 $name,2, "client_group: $client_group ";
               if ($group eq $client_group) {          
                 readingsBeginUpdate($hash); 
